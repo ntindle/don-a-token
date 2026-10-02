@@ -40,7 +40,7 @@
       "endpoints": [
         "https://github.com/ntindle/don-a-token/releases/latest/download/latest.json"
       ],
-      "pubkey": "TODO: generate with `tauri signer generate` and paste the public key here"
+      "pubkey": "RWTZoZJ+pP0Wabj9isYSEGjTl7RHBJbLrIdbMVbrDB78XqafLgrB1dLA"
     }
   }
 }

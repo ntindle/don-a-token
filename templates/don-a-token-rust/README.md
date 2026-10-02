@@ -1,7 +1,8 @@
 # don-a-token-rust template
 
-E2B sandbox template for Rust donation jobs: Ubuntu 24.04 + Rust stable
-+ GitHub CLI + Codex CLI, running as non-root `user`.
+E2B sandbox template for Rust donation jobs: official `rust` image
+(builder disk scales with the base — plain Ubuntu's ~809M can't fit
+the toolchain) + git + Codex CLI, running as non-root `user`.
 
 ## Build
 
@@ -10,6 +11,21 @@ cd templates/don-a-token-rust
 cp .env.example .env   # fill in E2B_API_KEY (and E2B_API_URL for Embed)
 npm install
 npm run build          # builds alias `don-a-token-rust`
+```
+
+Small nodes (11GB WSL2) need a small builder (512MB VMs are all the
+hugepage pool fits — see the memfd note in versioning):
+
+```sh
+E2B_BUILD_CPU=1 E2B_BUILD_MEM=512 E2B_BUILD_DISK_MB=8192 npm run build -- don-a-token-rust-v2
+```
+
+Always boot-verify a new build — the in-builder checks run with the
+image ENV, but sandboxes don't inherit it, so only a real boot proves
+the toolchain resolves:
+
+```sh
+node verify.mjs don-a-token-rust-v2   # needs E2B_API_KEY + E2B_API_URL in env/.env
 ```
 
 For Embed, point at the node: `E2B_API_URL=http://<embed-host>:3000`

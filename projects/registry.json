@@ -11,7 +11,7 @@
       "status": "active",
       "job": {
         "kind": "codex-task",
-        "template": "don-a-token-rust",
+        "template": "don-a-token-rust-v2",
         "max_tokens_per_job": 50000,
         "max_minutes_per_job": 30,
         "checks": ["cargo test"],
