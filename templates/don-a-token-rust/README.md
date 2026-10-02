@@ -2,7 +2,9 @@
 
 E2B sandbox template for Rust donation jobs: official `rust` image
 (builder disk scales with the base — plain Ubuntu's ~809M can't fit
-the toolchain) + git + Codex CLI, running as non-root `user`.
+the toolchain) + pinned nightly + sccache + git + Codex CLI, running
+as non-root `user`. Stable is deleted at build time; the template
+disk is 3.2G and ~700M must stay free for repo + registry + target.
 
 ## Build
 
