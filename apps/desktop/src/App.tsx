@@ -10,7 +10,14 @@ import {
   type OnboardingStep,
   type Settings,
 } from "./lib/settings";
-import { onTrayAction } from "./lib/tauri";
+import { listen } from "@tauri-apps/api/event";
+import {
+  MANAGE_USAGE_URL,
+  isTauri,
+  onTrayAction,
+  openExternal,
+} from "./lib/tauri";
+import { pushScheduler } from "./lib/scheduler";
 
 function stepFromHash(): OnboardingStep | null {
   const h = window.location.hash.replace(/^#\/?/, "");
@@ -20,9 +27,25 @@ function stepFromHash(): OnboardingStep | null {
 export default function App() {
   const [settings, setSettings] = useState<Settings | null>(null);
   const [signedIn, setSignedIn] = useState(false);
+  const [halted, setHalted] = useState(false);
 
   useEffect(() => {
     loadSettings().then(setSettings);
+  }, []);
+
+  // Push every settings change to the background scheduler.
+  useEffect(() => {
+    if (settings) void pushScheduler(settings);
+  }, [settings]);
+
+  // Scheduler halts after repeated failures; surface it once seen.
+  useEffect(() => {
+    if (!isTauri()) return;
+    let off = () => {};
+    void listen("scheduler:halted", () => setHalted(true)).then((u) => {
+      off = u;
+    });
+    return () => off();
   }, []);
 
   const update = useCallback(async (next: Settings) => {
@@ -94,6 +117,24 @@ export default function App() {
 
   return (
     <main className="shell">
+      {halted && (
+        <p className="halt-banner" role="alert">
+          Donations paused after repeated job failures. Check the runner
+          backend and API key, then change any setting to retry.{" "}
+          <a
+            href={MANAGE_USAGE_URL}
+            onClick={(e) => {
+              e.preventDefault();
+              void openExternal(MANAGE_USAGE_URL);
+            }}
+          >
+            Manage usage
+          </a>{" "}
+          <button className="btn btn-ghost" onClick={() => setHalted(false)}>
+            Dismiss
+          </button>
+        </p>
+      )}
       {showPlanModal && (
         <FirstRunModal
           onDismiss={() => void update({ ...settings, seenPlanModal: true })}

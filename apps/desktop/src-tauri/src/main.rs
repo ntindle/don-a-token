@@ -2,6 +2,7 @@
 
 mod auth;
 mod runner;
+mod scheduler;
 
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{MouseButton, TrayIconBuilder, TrayIconEvent};
@@ -71,6 +72,7 @@ fn main() {
         ))
         .manage(auth::PendingState::default())
         .manage(runner::JobState::default())
+        .manage(scheduler::SchedulerState::default())
         .invoke_handler(tauri::generate_handler![
             get_host_id,
             auth::start_sign_in,
@@ -79,11 +81,15 @@ fn main() {
             auth::sign_out,
             runner::job_submit,
             runner::job_status,
-            runner::job_cancel
+            runner::job_cancel,
+            scheduler::scheduler_sync,
+            scheduler::scheduler_status
         ])
         .setup(|app| {
             build_tray(app.handle())?;
             auth::spawn_refresh_loop(app.handle().clone());
+            scheduler::restore(app.handle());
+            scheduler::spawn_loop(app.handle().clone());
             Ok(())
         })
         .run(tauri::generate_context!())

@@ -203,19 +203,19 @@ async fn collect_stream(mut res: reqwest::Response) -> Result<CommandOutput, Str
 // ---------------------------------------------------------------------------
 
 #[derive(Debug)]
-struct JobRecord {
-    sandbox_id: String,
-    sandbox: SandboxCreated,
-    cfg: E2bConfig,
-    status: JobStatus,
-    output: CommandOutput,
-    max_minutes: u32,
+pub(crate) struct JobRecord {
+    pub(crate) sandbox_id: String,
+    pub(crate) sandbox: SandboxCreated,
+    pub(crate) cfg: E2bConfig,
+    pub(crate) status: JobStatus,
+    pub(crate) output: CommandOutput,
+    pub(crate) max_minutes: u32,
 }
 
 #[derive(Default)]
 pub struct JobState(pub Mutex<HashMap<String, JobRecord>>);
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct RunnerConfigArgs {
     pub api_base: String,
     pub api_key: Option<String>,
@@ -269,6 +269,16 @@ fn tail(bytes: &[u8]) -> String {
 pub async fn job_submit(
     app: AppHandle,
     jobs: State<'_, JobState>,
+    config: RunnerConfigArgs,
+    job: SubmitJobArgs,
+) -> Result<JobHandleView, String> {
+    submit_job_inner(&app, &jobs, config, job).await
+}
+
+/// Shared by the `job_submit` command and the background scheduler.
+pub async fn submit_job_inner(
+    app: &AppHandle,
+    jobs: &JobState,
     config: RunnerConfigArgs,
     job: SubmitJobArgs,
 ) -> Result<JobHandleView, String> {

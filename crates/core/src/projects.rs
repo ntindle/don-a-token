@@ -99,6 +99,19 @@ impl Registry {
     }
 }
 
+/// Round-robin pick over `ids` (in order), starting after `last_id`.
+/// Unknown ids are skipped; empty input yields `None`.
+pub fn pick_next<'a>(ids: &[&'a str], last_id: Option<&str>) -> Option<&'a str> {
+    if ids.is_empty() {
+        return None;
+    }
+    let start = last_id
+        .and_then(|last| ids.iter().position(|id| *id == last))
+        .map(|pos| (pos + 1) % ids.len())
+        .unwrap_or(0);
+    Some(ids[start])
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -149,6 +162,17 @@ mod tests {
         let mut reg = Registry::load_from_str(FIXTURE).unwrap();
         reg.projects[0].repo = "http://example.com/x".to_string();
         assert!(reg.validate().is_err());
+    }
+
+    #[test]
+    fn pick_next_round_robins() {
+        let ids = ["a", "b", "c"];
+        assert_eq!(pick_next(&ids, None), Some("a"));
+        assert_eq!(pick_next(&ids, Some("a")), Some("b"));
+        assert_eq!(pick_next(&ids, Some("c")), Some("a"));
+        assert_eq!(pick_next(&ids, Some("gone")), Some("a"));
+        let empty: [&str; 0] = [];
+        assert_eq!(pick_next(&empty, None), None);
     }
 
     #[test]

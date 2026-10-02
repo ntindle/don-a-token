@@ -31,6 +31,8 @@ export interface Settings {
   githubUsername: string | null;
   runnerBackend: RunnerBackend;
   embedEndpoint: string;
+  /** E2B team API key (Cloud) or Embed install key. TODO: move to OS keychain. */
+  e2bApiKey: string | null;
   seenPlanModal: boolean;
   onboardingStep: OnboardingStep;
 }
@@ -51,6 +53,7 @@ export const DEFAULT_SETTINGS: Settings = {
   githubUsername: null,
   runnerBackend: "e2b-cloud",
   embedEndpoint: "http://127.0.0.1:3000",
+  e2bApiKey: null,
   seenPlanModal: false,
   onboardingStep: "welcome",
 };

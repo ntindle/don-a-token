@@ -14,6 +14,7 @@ use chrono::{DateTime, Datelike, Timelike, Utc};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
 pub struct QuietHours {
     /// Inclusive start hour, UTC.
     pub start_hour: u8,
@@ -21,7 +22,9 @@ pub struct QuietHours {
     pub end_hour: u8,
 }
 
+/// Shared contract with the frontend settings store (camelCase JSON).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
 pub struct DonationRules {
     pub enabled: bool,
     pub max_pct_of_remaining: u8,
@@ -159,6 +162,16 @@ mod tests {
         r.paused_until = Some(noon() + chrono::Duration::hours(1));
         assert_eq!(r.should_run(noon()).reason, "paused");
         assert!(r.should_run(noon() + chrono::Duration::hours(2)).run);
+    }
+
+    #[test]
+    fn rules_json_is_camel_case_for_frontend() {
+        let json = serde_json::to_value(DonationRules::default()).unwrap();
+        assert_eq!(json["maxPctOfRemaining"], 10);
+        assert_eq!(json["reserveFloorPct"], 5);
+        assert_eq!(json["cooldownMinutesBetweenJobs"], 15);
+        let back: DonationRules = serde_json::from_value(json).unwrap();
+        assert_eq!(back, DonationRules::default());
     }
 
     #[test]
