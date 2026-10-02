@@ -61,8 +61,14 @@ export default function Welcome({ onSignedIn, onExplore }: Props) {
           onClick={handleContinue}
           disabled={busy}
         >
-          {busy ? "Opening…" : "Continue with ChatGPT"}
+          {busy ? "Waiting for browser approval…" : "Continue with ChatGPT"}
         </button>
+        {busy && (
+          <p className="fineprint">
+            Approve the request in the browser window that just opened, then
+            return here.
+          </p>
+        )}
         {error && <p className="error">{error}</p>}
 
         <p className="fineprint">

@@ -19,7 +19,7 @@ use tauri_plugin_opener::OpenerExt;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 use tokio::sync::Mutex;
-use tokio::time::timeout;
+use tokio::time::timeout_at;
 
 /// How long `start_sign_in` waits for the browser to hit the callback.
 const CALLBACK_TIMEOUT: Duration = Duration::from_secs(300);
@@ -135,21 +135,32 @@ const CALLBACK_HTML: &str = concat!(
     "</body></html>",
 );
 
-/// Serve exactly one loopback callback request, then shut down.
-async fn await_callback(listener: TcpListener) -> Result<String, String> {
-    let (mut socket, _) = timeout(CALLBACK_TIMEOUT, listener.accept())
-        .await
-        .map_err(|_| "sign-in timed out waiting for the browser callback".to_string())
-        .and_then(|r| r.map_err(|e| format!("callback accept: {e}")))?;
+const NOT_FOUND_HTML: &str = concat!(
+    "HTTP/1.1 404 Not Found\r\nContent-Type: text/html; charset=utf-8\r\n",
+    "Connection: close\r\n\r\n",
+    "<!doctype html><html><body style=\"font-family:sans-serif\">",
+    "<h1>Don-a-Token sign-in</h1>",
+    "<p>This isn't a sign-in link. Return to the app and click ",
+    "<b>Continue with ChatGPT</b> to start a fresh sign-in.</p>",
+    "</body></html>",
+);
+
+/// Read one HTTP request head (up to the blank line) or fail. The
+/// attempt deadline bounds every read, so a dangling connection can't
+/// extend the wait past it.
+async fn read_request(
+    socket: &mut tokio::net::TcpStream,
+    deadline: tokio::time::Instant,
+) -> Result<String, String> {
     let mut buf = vec![0u8; 16384];
     let mut len = 0usize;
     loop {
         if len >= buf.len() {
             return Err("callback request too large".to_string());
         }
-        let n = timeout(CALLBACK_TIMEOUT, socket.read(&mut buf[len..]))
+        let n = timeout_at(deadline, socket.read(&mut buf[len..]))
             .await
-            .map_err(|_| "sign-in timed out reading the callback".to_string())
+            .map_err(|_| "sign-in timed out waiting for the browser callback".to_string())
             .and_then(|r| r.map_err(|e| format!("callback read: {e}")))?;
         if n == 0 {
             break;
@@ -159,9 +170,42 @@ async fn await_callback(listener: TcpListener) -> Result<String, String> {
             break;
         }
     }
-    let _ = socket.write_all(CALLBACK_HTML.as_bytes()).await;
-    let req = String::from_utf8_lossy(&buf[..len]).into_owned();
-    parse_callback_request(&req).ok_or_else(|| "unexpected callback request".to_string())
+    Ok(String::from_utf8_lossy(&buf[..len]).into_owned())
+}
+
+/// Wait for the loopback callback until the deadline. Only a GET for the
+/// exact callback path completes the attempt (200 + query string).
+/// Anything else — stray probes, favicon fetches, refreshes, oversized
+/// requests — gets a 404 and the wait continues, so one stray connection
+/// can no longer kill a sign-in and leave the browser facing a dead port.
+async fn await_callback(listener: TcpListener) -> Result<String, String> {
+    let deadline = tokio::time::Instant::now() + CALLBACK_TIMEOUT;
+    loop {
+        if tokio::time::Instant::now() >= deadline {
+            return Err("sign-in timed out waiting for the browser callback".to_string());
+        }
+        let (mut socket, _) = timeout_at(deadline, listener.accept())
+            .await
+            .map_err(|_| "sign-in timed out waiting for the browser callback".to_string())
+            .and_then(|r| r.map_err(|e| format!("callback accept: {e}")))?;
+        match read_request(&mut socket, deadline).await {
+            Ok(req) => match parse_callback_request(&req) {
+                Some(query) => {
+                    let _ = socket.write_all(CALLBACK_HTML.as_bytes()).await;
+                    let _ = socket.shutdown().await;
+                    return Ok(query);
+                }
+                None => {
+                    let _ = socket.write_all(NOT_FOUND_HTML.as_bytes()).await;
+                    let _ = socket.shutdown().await;
+                }
+            },
+            // Dropped, half-open, or oversized connection: keep waiting.
+            // The deadline check at the top of the loop still bounds the
+            // total wait, including reads that hit the deadline.
+            Err(_) => {}
+        }
+    }
 }
 
 async fn discovery(client: &reqwest::Client) -> Result<DiscoveryDoc, String> {
@@ -340,6 +384,7 @@ pub async fn start_sign_in(
         .local_addr()
         .map_err(|e| format!("callback port: {e}"))?
         .port();
+    eprintln!("[auth] listening for callback on 127.0.0.1:{port}");
     let redirect_uri = siwc::redirect_uri(port);
 
     let params = siwc::AuthorizeParams {
@@ -366,6 +411,10 @@ pub async fn start_sign_in(
     });
 
     let outcome = run_attempt(&app, &dir, &host, listener, url.as_str(), &pending).await;
+    match &outcome {
+        Ok(done) => eprintln!("[auth] outcome ok for {}", done.client_id),
+        Err(e) => eprintln!("[auth] outcome err: {e}"),
+    }
     *pending.0.lock().await = None;
     outcome
 }
@@ -382,6 +431,7 @@ async fn run_attempt(
         .open_url(auth_url, None::<&str>)
         .map_err(|e| format!("open browser: {e}"))?;
     let query = await_callback(listener).await?;
+    eprintln!("[auth] callback received ({} bytes)", query.len());
     let attempt = pending
         .0
         .lock()
@@ -410,9 +460,12 @@ async fn run_attempt(
     )
     .map_err(|e| e.to_string())?;
 
+    eprintln!("[auth] state ok; exchanging code");
     let client = http_client()?;
     let token = exchange_code(&client, &issued, &code, &attempt.verifier, &attempt.redirect_uri).await?;
+    eprintln!("[auth] code exchange ok; validating id token");
     let claims = validate_id_token(&client, &token.id_token, &issued, &attempt.nonce).await?;
+    eprintln!("[auth] id token valid; saving record");
     if let Some(expected) = attempt.expected_subject {
         if claims.sub != expected {
             return Err("signed in as a different account; keeping the saved one".to_string());
@@ -431,6 +484,7 @@ async fn run_attempt(
         Utc::now(),
     );
     credentials::save_record(dir, &record).map_err(|e| format!("save credentials: {e}"))?;
+    eprintln!("[auth] sign-in complete");
 
     Ok(SignInResult {
         email,
@@ -598,5 +652,56 @@ mod tests {
             None
         );
         assert_eq!(parse_callback_request(""), None);
+    }
+
+    async fn read_head(socket: &mut tokio::net::TcpStream) -> String {
+        let mut head = vec![0u8; 4096];
+        let mut got = 0usize;
+        while got < head.len() {
+            let n = socket.read(&mut head[got..]).await.unwrap();
+            if n == 0 {
+                break;
+            }
+            got += n;
+            if head[..got].windows(4).any(|w| w == b"\r\n\r\n") {
+                break;
+            }
+        }
+        String::from_utf8_lossy(&head[..got]).into_owned()
+    }
+
+    #[tokio::test]
+    async fn stray_connections_do_not_end_the_callback_wait() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let waiter = tokio::spawn(await_callback(listener));
+
+        // Stray probe on the wrong path: 404, and the wait continues.
+        let mut stray = tokio::net::TcpStream::connect(("127.0.0.1", port))
+            .await
+            .unwrap();
+        stray
+            .write_all(b"GET /favicon.ico HTTP/1.1\r\nHost: x\r\n\r\n")
+            .await
+            .unwrap();
+        assert!(read_head(&mut stray).await.starts_with("HTTP/1.1 404"));
+        assert!(!waiter.is_finished());
+
+        // Dropped empty connection: also harmless.
+        let _ = tokio::net::TcpStream::connect(("127.0.0.1", port)).await;
+
+        // The real callback completes the attempt with its query string.
+        let mut cb = tokio::net::TcpStream::connect(("127.0.0.1", port))
+            .await
+            .unwrap();
+        cb.write_all(b"GET /auth/callback?code=abc&state=xyz HTTP/1.1\r\nHost: x\r\n\r\n")
+            .await
+            .unwrap();
+        let out = tokio::time::timeout(Duration::from_secs(10), waiter)
+            .await
+            .expect("callback wait stalled")
+            .unwrap();
+        assert_eq!(out.unwrap(), "code=abc&state=xyz");
+        assert!(read_head(&mut cb).await.starts_with("HTTP/1.1 200"));
     }
 }
