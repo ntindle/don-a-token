@@ -182,9 +182,7 @@ pub fn resolve_client_id(
     if is_new_registration {
         match callback_client_id {
             None | Some("") => Err(CoreError::MissingClientId),
-            Some(id) if id == DYNAMIC_CLIENT_ID => {
-                Err(CoreError::DynamicClientIdNotIssuable)
-            }
+            Some(id) if id == DYNAMIC_CLIENT_ID => Err(CoreError::DynamicClientIdNotIssuable),
             Some(id) => Ok(id.to_string()),
         }
     } else {
@@ -298,9 +296,11 @@ mod tests {
     fn new_verifier_is_43_unreserved_chars() {
         let v = new_code_verifier();
         assert_eq!(v.len(), 43);
-        assert!(v
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.' || c == '~'));
+        assert!(v.chars().all(|c| c.is_ascii_alphanumeric()
+            || c == '-'
+            || c == '_'
+            || c == '.'
+            || c == '~'));
     }
 
     #[test]
@@ -311,10 +311,8 @@ mod tests {
 
     #[test]
     fn parse_new_registration_callback() {
-        let cb = parse_callback(
-            "code=abc123&scope=openid%20profile&state=xyz&client_id=oaiapp_1",
-        )
-        .unwrap();
+        let cb = parse_callback("code=abc123&scope=openid%20profile&state=xyz&client_id=oaiapp_1")
+            .unwrap();
         assert_eq!(cb.code.as_deref(), Some("abc123"));
         assert_eq!(cb.state.as_deref(), Some("xyz"));
         assert_eq!(cb.client_id.as_deref(), Some("oaiapp_1"));

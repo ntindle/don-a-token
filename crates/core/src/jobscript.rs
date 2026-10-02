@@ -54,7 +54,12 @@ pub fn build_bootstrap(spec: &BootstrapSpec) -> String {
     let repo = sh_quote(spec.repo_url);
     let base = sh_quote(spec.base_branch);
     let work = sh_quote(spec.workdir);
-    let codex = spec.codex_args.iter().map(|a| sh_quote(a)).collect::<Vec<_>>().join(" ");
+    let codex = spec
+        .codex_args
+        .iter()
+        .map(|a| sh_quote(a))
+        .collect::<Vec<_>>()
+        .join(" ");
     let mut checks = String::new();
     for check in spec.checks {
         checks.push_str(&format!(
@@ -101,7 +106,9 @@ pub fn attribution_footer(
     template: &str,
     client_id: Option<&str>,
 ) -> String {
-    let donor = donor.map(|d| format!("@{d}")).unwrap_or_else(|| "anonymous donor".to_string());
+    let donor = donor
+        .map(|d| format!("@{d}"))
+        .unwrap_or_else(|| "anonymous donor".to_string());
     let provenance = client_id.unwrap_or("unlinked");
     format!(
         "\n---\n*Donated via [don-a-token](https://github.com/ntindle/don-a-token) by {donor} · project `{project_id}` · job `{job_id}` · template `{template}` · harness `{provenance}`*"
@@ -123,10 +130,7 @@ pub fn redact(mut text: Vec<u8>, secrets: &[&str]) -> Vec<u8> {
     for secret in secrets.iter().filter(|s| !s.is_empty()) {
         let needle = secret.as_bytes();
         let mut at = 0;
-        while let Some(pos) = text[at..]
-            .windows(needle.len())
-            .position(|w| w == needle)
-        {
+        while let Some(pos) = text[at..].windows(needle.len()).position(|w| w == needle) {
             let start = at + pos;
             text.splice(start..start + needle.len(), b"[redacted]".iter().copied());
             at = start + "[redacted]".len();
@@ -156,7 +160,8 @@ mod tests {
             codex_args: &codex_args,
         };
         let script = build_bootstrap(&spec);
-        assert!(script.contains("git clone --depth 1 --branch 'main' 'https://github.com/phase-rs/phase'"));
+        assert!(script
+            .contains("git clone --depth 1 --branch 'main' 'https://github.com/phase-rs/phase'"));
         assert!(script.contains("codex 'exec'"));
         assert!(script.contains("sh -c 'cargo test'"));
         assert!(script.contains("git add -N .")); // new files join the diff

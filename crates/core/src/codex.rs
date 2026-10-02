@@ -20,7 +20,10 @@ pub const MODEL_PROVIDER: &str = "openai_chatgpt_plan";
 /// Both binaries use the same `-c key=value` config system.
 pub fn provider_config() -> Vec<(String, String)> {
     vec![
-        ("model_provider".to_string(), format!("\"{MODEL_PROVIDER}\"")),
+        (
+            "model_provider".to_string(),
+            format!("\"{MODEL_PROVIDER}\""),
+        ),
         (
             format!("model_providers.{MODEL_PROVIDER}.name"),
             "\"ChatGPT plan\"".to_string(),

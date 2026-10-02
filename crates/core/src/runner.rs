@@ -152,9 +152,6 @@ mod tests {
         let handle = runner.submit(&sample_job()).unwrap();
         assert_eq!(runner.status(&handle), JobStatus::Queued);
         runner.cancel(&handle).unwrap();
-        assert!(matches!(
-            runner.status(&handle),
-            JobStatus::Failed { .. }
-        ));
+        assert!(matches!(runner.status(&handle), JobStatus::Failed { .. }));
     }
 }

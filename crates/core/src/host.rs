@@ -101,10 +101,7 @@ mod tests {
             parse("urn:ietf:params:oauth:jwk-thumbprint:abc123").unwrap(),
             HostIdFormat::JwkThumbprint
         );
-        assert_eq!(
-            parse("did:key:z6Mkabc").unwrap(),
-            HostIdFormat::DidKey
-        );
+        assert_eq!(parse("did:key:z6Mkabc").unwrap(), HostIdFormat::DidKey);
     }
 
     #[test]

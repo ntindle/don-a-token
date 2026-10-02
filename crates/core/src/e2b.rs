@@ -140,10 +140,15 @@ pub fn start_body(cmd: &str, args: &[String], envs: &Value, cwd: Option<&str>) -
 /// One decoded process event from the Start response stream.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ProcEvent {
-    Started { pid: u32 },
+    Started {
+        pid: u32,
+    },
     Stdout(Vec<u8>),
     Stderr(Vec<u8>),
-    Ended { exit_code: i32, error: Option<String> },
+    Ended {
+        exit_code: i32,
+        error: Option<String>,
+    },
     KeepAlive,
 }
 
@@ -182,7 +187,9 @@ pub fn parse_event_line(line: &str) -> Result<ProcEvent, CoreError> {
                 .map_err(|_| CoreError::InvalidRegistry("bad base64 pty".into()))?;
             return Ok(ProcEvent::Stdout(bytes));
         }
-        return Err(CoreError::InvalidRegistry("data event has no output".into()));
+        return Err(CoreError::InvalidRegistry(
+            "data event has no output".into(),
+        ));
     }
     if let Some(end) = event.get("end") {
         // envd reports Go-style `status` ("exit status 0") and no numeric
@@ -191,7 +198,11 @@ pub fn parse_event_line(line: &str) -> Result<ProcEvent, CoreError> {
             .get("exitCode")
             .and_then(Value::as_i64)
             .map(|c| c as i32)
-            .or_else(|| end.get("status").and_then(Value::as_str).and_then(parse_exit_status))
+            .or_else(|| {
+                end.get("status")
+                    .and_then(Value::as_str)
+                    .and_then(parse_exit_status)
+            })
             .or_else(|| {
                 if end.get("exited").and_then(Value::as_bool) == Some(true)
                     && end.get("error").is_none()
@@ -343,15 +354,37 @@ mod tests {
     #[test]
     fn end_event_parses_live_shapes() {
         // Observed from real envd (no numeric code).
-        let live = parse_event_line(r#"{"event":{"end":{"exited":true, "status":"exit status 0"}}}"#).unwrap();
-        assert_eq!(live, ProcEvent::Ended { exit_code: 0, error: None });
+        let live =
+            parse_event_line(r#"{"event":{"end":{"exited":true, "status":"exit status 0"}}}"#)
+                .unwrap();
+        assert_eq!(
+            live,
+            ProcEvent::Ended {
+                exit_code: 0,
+                error: None
+            }
+        );
         let live_fail =
-            parse_event_line(r#"{"event":{"end":{"exited":true, "status":"exit status 3"}}}"#).unwrap();
-        assert_eq!(live_fail, ProcEvent::Ended { exit_code: 3, error: None });
+            parse_event_line(r#"{"event":{"end":{"exited":true, "status":"exit status 3"}}}"#)
+                .unwrap();
+        assert_eq!(
+            live_fail,
+            ProcEvent::Ended {
+                exit_code: 3,
+                error: None
+            }
+        );
         // Older/documented shape with an explicit code still wins.
         let legacy =
-            parse_event_line(r#"{"event":{"end":{"exitCode":0,"exited":true,"status":"ok"}}}"#).unwrap();
-        assert_eq!(legacy, ProcEvent::Ended { exit_code: 0, error: None });
+            parse_event_line(r#"{"event":{"end":{"exitCode":0,"exited":true,"status":"ok"}}}"#)
+                .unwrap();
+        assert_eq!(
+            legacy,
+            ProcEvent::Ended {
+                exit_code: 0,
+                error: None
+            }
+        );
     }
 
     #[test]
@@ -415,8 +448,10 @@ mod tests {
     fn failed_exit_reports_code_and_error() {
         let mut out = CommandOutput::default();
         out.apply(
-            &parse_event_line(r#"{"event":{"end":{"exitCode":3,"exited":true,"status":"x","error":"boom"}}}"#)
-                .unwrap(),
+            &parse_event_line(
+                r#"{"event":{"end":{"exitCode":3,"exited":true,"status":"x","error":"boom"}}}"#,
+            )
+            .unwrap(),
         );
         assert!(!out.succeeded());
         assert_eq!(out.exit_code, Some(3));

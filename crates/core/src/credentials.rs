@@ -242,8 +242,7 @@ mod tests {
 
     #[test]
     fn save_load_list_roundtrip() {
-        let dir =
-            std::env::temp_dir().join(format!("dat-creds-test-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("dat-creds-test-{}", std::process::id()));
         fs::create_dir_all(&dir).unwrap();
         let rec = sample_record();
         save_record(&dir, &rec).unwrap();
