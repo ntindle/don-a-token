@@ -17,9 +17,10 @@ export default function Welcome({ onSignedIn, onExplore }: Props) {
     try {
       await startSignIn();
       onSignedIn();
-    } catch {
-      // Auth spike wires the real SIWC flow; until then, be honest.
-      setError("Sign-in isn't wired yet — the auth spike lands next.");
+    } catch (e) {
+      setError(
+        `Sign-in failed: ${e instanceof Error ? e.message : String(e)}`,
+      );
     } finally {
       setBusy(false);
     }
