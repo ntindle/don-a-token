@@ -17,10 +17,11 @@ npm run build          # builds alias `don-a-token-rust`
 
 Small nodes (11GB WSL2, 512 hugepages) need a small builder. Build
 steps resume the builder sandbox from snapshot, which transiently
-needs ~2x the builder memory in hugetlb reservations, and crashed
-sandboxes leak `HugePages_Rsvd` that only a reboot clears — so 384MB
-builders are the safe size (512MB fails resume with `mmap memfd:
-cannot allocate memory` once ~60 pages are reserved):
+needs ~2x the builder memory in hugetlb reservations, and
+`HugePages_Rsvd` sits at a 63-page baseline from boot (the stack's
+own reservations — present with zero sandboxes ever run), leaving
+~449 effective pages — so 384MB builders are the safe size (512MB
+fails resume with `mmap memfd: cannot allocate memory`):
 
 ```sh
 E2B_BUILD_CPU=1 E2B_BUILD_MEM=384 E2B_BUILD_DISK_MB=8192 npm run build -- don-a-token-rust-v4

@@ -77,8 +77,12 @@ instanceIdleTimeout=-1
 
 [wsl2]
 vmIdleTimeout=-1
-autoMemoryReclaim=gradual   # else vmmemWSL never shrinks (page-cache bloat)
 ```
+
+(`autoMemoryReclaim` is NOT valid on this box's WSL 2.7.112 —
+`wsl` warns `Unknown key` and ignores it. vmmemWSL page-cache bloat
+is instead relieved with `sync; echo 3 >
+/proc/sys/vm/drop_caches` inside the guest.)
 
 Until a shutdown applies it, hold the distro with a live client for
 the duration of any long work (build, verify, E2E):
@@ -106,10 +110,12 @@ wsl -d Ubuntu -- sleep 3600   # keep alive until the job finishes
 - **Build with 384MB builders on this node**
   (`E2B_BUILD_MEM=384 E2B_BUILD_CPU=1`). Each build step resumes the
   builder from snapshot, transiently needing ~2x builder memory in
-  hugetlb. Crashed sandboxes leak `HugePages_Rsvd` that no process
-  holds and only a reboot clears (seen stuck at 63); with that leak,
-  512MB builders fail resume with `mmap memfd: cannot allocate
-  memory`. Template sandboxes inherit build memory (v4 runs 384MB).
+  hugetlb. `HugePages_Rsvd` sits at a 63-page baseline from boot
+  (the stack's own reservations — verified present on a virgin
+  kernel with zero sandboxes ever run), leaving ~449 effective
+  pages, so 512MB builders fail resume with `mmap memfd: cannot
+  allocate memory`. Template sandboxes inherit build memory
+  (v4 runs 384MB).
 - **Purge stale sandbox networking after unclean deaths.**
   Crashed sandboxes leak netns (`ns-N`), host `veth-N` links, and
   `10.11.0.0/24` routes; with zero sandboxes alive, delete them all
