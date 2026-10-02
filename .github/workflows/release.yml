@@ -48,7 +48,8 @@ jobs:
           librsvg2-dev
       - run: pnpm install --frozen-lockfile
       - name: Generate bundle icons (incl. .icns)
-        run: pnpm --filter @don-a-token/desktop tauri icon apps/desktop/src-tauri/icons/icon.png
+        # NOTE: --filter runs in apps/desktop, so the path is package-relative.
+        run: pnpm --filter @don-a-token/desktop tauri icon src-tauri/icons/icon.png
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
