@@ -21,12 +21,14 @@
           "status": { "enum": ["active", "paused"] },
           "job": {
             "type": "object",
-            "required": ["kind", "template", "max_tokens_per_job", "max_minutes_per_job", "contribution"],
+            "required": ["kind", "template", "max_tokens_per_job", "max_minutes_per_job", "checks", "prompt_pack", "contribution"],
             "properties": {
               "kind": { "type": "string", "minLength": 1 },
               "template": { "type": "string", "minLength": 1 },
               "max_tokens_per_job": { "type": "integer", "minimum": 1 },
               "max_minutes_per_job": { "type": "integer", "minimum": 1 },
+              "checks": { "type": "array", "items": { "type": "string" } },
+              "prompt_pack": { "type": "string", "minLength": 1 },
               "contribution": {
                 "type": "object",
                 "required": ["method", "base_branch", "attribution_footer"],

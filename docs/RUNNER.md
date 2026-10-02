@@ -40,17 +40,34 @@ JobRequest { project_id, job_id, template, prompt_pack, env (no secrets), max_mi
 - Sandbox templates per project stack (`don-a-token-rust` first);
   templates build through the same E2B API on every backend.
 
-## Contribution authentication (design)
+## Trust model: what enters the sandbox
+
+Each job receives, as per-command process env (never on the sandbox
+record, never in logs — captured output is redacted):
+
+- `ACCESS_TOKEN`: the donor's SIWC access token (1-hour life, refreshed
+  at submit). The donor's plan pays for inference, so the token must be
+  present where Codex runs. On Embed-local the sandbox is the donor's own
+  hardware; on Cloud/remote the token leaves the machine — donors opt
+  into that backend explicitly, and short expiry bounds the exposure.
+- `DONATION_GITHUB_TOKEN` (when configured): contribution credential.
+- `JOB_PROMPT_B64` / `PR_BODY_B64`: job inputs.
+
+Codex runs as `codex exec` with the plan provider overrides, its own
+`workspace-write` sandbox on (defense-in-depth inside E2B), and no
+dangerous bypass flags.
+
+## Contribution authentication
 
 Requirements: PRs open in the donor's name, attributable, revocable, and
 never expose long-lived donor credentials to the sandbox.
 
-- Donors link GitHub in the app (username now; OAuth device flow next,
-  other forges later).
-- The harness mints **short-lived, per-job contribution credentials**
-  (options: GitHub App installation tokens scoped to the target repo, or
-  fine-grained PATs via device flow) and injects only those into the
-  sandbox. They expire with the job.
+- Donors link GitHub in the app (username + interim PAT now; OAuth
+  device flow and other forges later).
+- Interim: the donor's PAT is injected per job. Follow-up: the harness
+  mints **short-lived, per-job contribution credentials** (GitHub App
+  installation tokens scoped to the target repo, or fine-grained PATs
+  via device flow) that expire with the job.
 - Every PR footer carries: donor identity, project job-spec version, and
   the SIWC `client_id` as harness provenance.
 - Projects verify PRs against the contributions tracker + registry history.

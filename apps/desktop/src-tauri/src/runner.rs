@@ -12,6 +12,7 @@ use std::collections::HashMap;
 use std::time::Duration;
 
 use don_a_token_core::e2b::{self, CommandOutput, E2bConfig, SandboxCreated};
+use don_a_token_core::jobscript;
 use don_a_token_core::runner::{JobHandle, JobStatus};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager, State};
@@ -210,6 +211,7 @@ pub(crate) struct JobRecord {
     pub(crate) status: JobStatus,
     pub(crate) output: CommandOutput,
     pub(crate) max_minutes: u32,
+    pub(crate) env_vars: Vec<(String, String)>,
 }
 
 #[derive(Default)]
@@ -297,13 +299,9 @@ pub async fn submit_job_inner(
         "project_id": job.project_id,
         "job_id": job.job_id,
     });
-    let env_vars: serde_json::Value = job
-        .env
-        .iter()
-        .map(|(k, v)| (k.clone(), serde_json::Value::String(v.clone())))
-        .collect();
+    // Secrets travel as per-command Start env, never on the sandbox record.
     let sandbox = runner
-        .create_sandbox(&job.template, timeout_secs, metadata, env_vars)
+        .create_sandbox(&job.template, timeout_secs, metadata, serde_json::json!({}))
         .await?;
 
     let handle = JobHandle {
@@ -318,6 +316,7 @@ pub async fn submit_job_inner(
             status: JobStatus::Running,
             output: CommandOutput::default(),
             max_minutes: job.max_minutes,
+            env_vars: job.env,
         },
     );
 
@@ -332,7 +331,7 @@ pub async fn submit_job_inner(
 }
 
 async fn drive_job(app: AppHandle, handle_id: String, command: Vec<String>) {
-    let (runner, sandbox, max_minutes) = {
+    let (runner, sandbox, max_minutes, envs, secrets) = {
         let jobs = app.state::<JobState>();
         let guard = jobs.0.lock().await;
         let Some(rec) = guard.get(&handle_id) else {
@@ -346,24 +345,32 @@ async fn drive_job(app: AppHandle, handle_id: String, command: Vec<String>) {
                 return;
             }
         };
-        (runner, rec.sandbox.clone(), rec.max_minutes)
+        let envs: serde_json::Value = rec
+            .env_vars
+            .iter()
+            .map(|(k, v)| (k.clone(), serde_json::Value::String(v.clone())))
+            .collect();
+        let secrets: Vec<String> = rec.env_vars.iter().map(|(_, v)| v.clone()).collect();
+        (
+            runner,
+            rec.sandbox.clone(),
+            rec.max_minutes,
+            envs,
+            secrets,
+        )
     };
 
     let overall = Duration::from_secs(u64::from(max_minutes) * 60 + SANDBOX_MARGIN_SECS);
     let outcome = runner
-        .run_command(
-            &sandbox,
-            &command[0],
-            &command[1..].to_vec(),
-            &serde_json::json!({}),
-            None,
-            overall,
-        )
+        .run_command(&sandbox, &command[0], &command[1..].to_vec(), &envs, None, overall)
         .await;
     let _ = runner.kill_sandbox(&sandbox.sandbox_id).await;
 
     match outcome {
-        Ok(output) => {
+        Ok(mut output) => {
+            let refs: Vec<&str> = secrets.iter().map(String::as_str).collect();
+            output.stdout = jobscript::redact(std::mem::take(&mut output.stdout), &refs);
+            output.stderr = jobscript::redact(std::mem::take(&mut output.stderr), &refs);
             let status = if output.succeeded() {
                 JobStatus::Succeeded
             } else {

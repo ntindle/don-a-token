@@ -6,9 +6,11 @@
 //! restart. One job at a time; three consecutive failures halt with an
 //! event the frontend surfaces.
 
+use base64::Engine as _;
 use chrono::{DateTime, Utc};
 use don_a_token_core::projects::pick_next;
 use don_a_token_core::rules::DonationRules;
+use don_a_token_core::{codex, credentials, jobscript};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager, State};
 use tokio::sync::Mutex;
@@ -23,7 +25,11 @@ const FAILURE_HALT_COUNT: u32 = 3;
 pub struct SchedProject {
     pub id: String,
     pub template: String,
-    pub command: Vec<String>,
+    pub repo: String,
+    pub base_branch: String,
+    pub prompt: String,
+    pub checks: Vec<String>,
+    pub prompt_pack: String,
     pub max_minutes: u32,
 }
 
@@ -33,6 +39,10 @@ pub struct SchedulerConfig {
     pub rules: DonationRules,
     pub projects: Vec<SchedProject>,
     pub runner: RunnerConfigArgs,
+    pub donor: Option<String>,
+    /// Interim contribution credential (donor PAT). GitHub App installation
+    /// tokens are the follow-up; see docs/RUNNER.md.
+    pub github_token: Option<String>,
 }
 
 struct SchedulerData {
@@ -311,14 +321,61 @@ async fn submit_next(app: &AppHandle, config: &SchedulerConfig) {
     let Some(spec) = config.projects.iter().find(|p| p.id == next_id) else {
         return;
     };
+    let (client_id, access_token) = match plan_account_token(app).await {
+        Ok(t) => t,
+        Err(e) => {
+            sched.0.lock().await.last_verdict = e;
+            return;
+        }
+    };
+    let job_id = Utc::now().timestamp().to_string();
+    let branch = format!("don-a-token/{}-{job_id}", spec.id);
+    let footer = jobscript::attribution_footer(
+        config.donor.as_deref(),
+        &spec.id,
+        &job_id,
+        &spec.template,
+        Some(&client_id),
+    );
+    let pr_title = format!("don-a-token({}): automated contribution {job_id}", spec.id);
+    let pr_body = jobscript::pr_body(&spec.id, &footer);
+    let exec = jobscript::standard_exec_args("/work/job");
+    let bspec = jobscript::BootstrapSpec {
+        repo_url: &spec.repo,
+        base_branch: &spec.base_branch,
+        branch: &branch,
+        workdir: "/work/job",
+        checks: &spec.checks,
+        codex_args: &exec,
+        pr_title: &pr_title,
+    };
+    let script = jobscript::build_bootstrap(&bspec);
+    let b64 = base64::engine::general_purpose::STANDARD;
+    let mut env = vec![
+        (
+            codex::ENV_ACCESS_TOKEN.to_string(),
+            access_token,
+        ),
+        (
+            jobscript::ENV_JOB_PROMPT_B64.to_string(),
+            b64.encode(spec.prompt.as_bytes()),
+        ),
+        (
+            jobscript::ENV_PR_BODY_B64.to_string(),
+            b64.encode(pr_body.as_bytes()),
+        ),
+    ];
+    if let Some(tok) = &config.github_token {
+        env.push((jobscript::ENV_CONTRIB_TOKEN.to_string(), tok.clone()));
+    }
     let max_minutes = spec.max_minutes.min(config.rules.max_minutes_per_job);
     let args = SubmitJobArgs {
         project_id: spec.id.clone(),
-        job_id: Utc::now().timestamp().to_string(),
+        job_id,
         template: spec.template.clone(),
-        prompt_pack: String::new(),
-        command: spec.command.clone(),
-        env: Vec::new(),
+        prompt_pack: spec.prompt_pack.clone(),
+        command: vec!["sh".to_string(), "-c".to_string(), script],
+        env,
         max_minutes,
     };
     let jobs = app.state::<JobState>();
@@ -339,6 +396,33 @@ async fn submit_next(app: &AppHandle, config: &SchedulerConfig) {
 
 fn truncate(s: &str, max: usize) -> String {
     s.chars().take(max).collect()
+}
+
+/// First saved account with plan usage, refreshed if due.
+/// Returns (client_id, access_token).
+async fn plan_account_token(app: &AppHandle) -> Result<(String, String), String> {
+    let dir = app_dir(app)?;
+    let ids = credentials::list_client_ids(&dir).map_err(|e| format!("list accounts: {e}"))?;
+    for id in ids {
+        let rec = match credentials::load_record(&dir, &id) {
+            Ok(r) => r,
+            Err(_) => continue,
+        };
+        if !rec.has_plan_usage() {
+            continue;
+        }
+        if rec.should_refresh(Utc::now()) {
+            if crate::auth::refresh_account(app.clone(), id.clone()).await.is_err() {
+                continue;
+            }
+            let Ok(fresh) = credentials::load_record(&dir, &id) else {
+                continue;
+            };
+            return Ok((id, fresh.access_token));
+        }
+        return Ok((id, rec.access_token));
+    }
+    Err("no-account".to_string())
 }
 
 #[cfg(test)]
@@ -381,13 +465,21 @@ mod tests {
             "projects": [{
                 "id": "phase",
                 "template": "don-a-token-rust",
-                "command": ["sh", "-c", "echo hi"],
+                "repo": "https://github.com/phase-rs/phase",
+                "baseBranch": "main",
+                "prompt": "do good work",
+                "checks": ["cargo test"],
+                "promptPack": "phase",
                 "maxMinutes": 30
             }],
-            "runner": { "api_base": "http://127.0.0.1:3000", "api_key": null, "sandbox_base": null }
+            "runner": { "api_base": "http://127.0.0.1:3000", "api_key": null, "sandbox_base": null },
+            "donor": "octocat",
+            "githubToken": null
         });
         let cfg: SchedulerConfig = serde_json::from_value(json).unwrap();
         assert_eq!(cfg.projects[0].id, "phase");
+        assert_eq!(cfg.projects[0].prompt, "do good work");
         assert_eq!(cfg.rules.max_pct_of_remaining, 10);
+        assert_eq!(cfg.donor.as_deref(), Some("octocat"));
     }
 }

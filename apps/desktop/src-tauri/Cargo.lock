@@ -902,6 +902,7 @@ dependencies = [
 name = "don-a-token"
 version = "0.1.0"
 dependencies = [
+ "base64 0.22.1",
  "chrono",
  "don-a-token-core",
  "jsonwebtoken",

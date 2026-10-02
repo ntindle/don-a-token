@@ -14,6 +14,7 @@ pub mod codex;
 pub mod credentials;
 pub mod e2b;
 pub mod host;
+pub mod jobscript;
 pub mod projects;
 pub mod rules;
 pub mod runner;

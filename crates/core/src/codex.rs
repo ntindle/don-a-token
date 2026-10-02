@@ -16,29 +16,77 @@ pub const ENV_ACCESS_TOKEN: &str = "ACCESS_TOKEN";
 
 pub const MODEL_PROVIDER: &str = "openai_chatgpt_plan";
 
+/// (key, TOML value) provider overrides shared by `app-server` and `exec`.
+/// Both binaries use the same `-c key=value` config system.
+pub fn provider_config() -> Vec<(String, String)> {
+    vec![
+        ("model_provider".to_string(), format!("\"{MODEL_PROVIDER}\"")),
+        (
+            format!("model_providers.{MODEL_PROVIDER}.name"),
+            "\"ChatGPT plan\"".to_string(),
+        ),
+        (
+            format!("model_providers.{MODEL_PROVIDER}.base_url"),
+            "\"https://api.openai.com/v1\"".to_string(),
+        ),
+        (
+            format!("model_providers.{MODEL_PROVIDER}.env_key"),
+            format!("\"{ENV_ACCESS_TOKEN}\""),
+        ),
+        (
+            format!("model_providers.{MODEL_PROVIDER}.wire_api"),
+            "\"responses\"".to_string(),
+        ),
+        (
+            format!("model_providers.{MODEL_PROVIDER}.requires_openai_auth"),
+            "false".to_string(),
+        ),
+        (
+            format!("model_providers.{MODEL_PROVIDER}.supports_websockets"),
+            "false".to_string(),
+        ),
+    ]
+}
+
+fn config_args() -> Vec<String> {
+    let mut out = Vec::new();
+    for (key, value) in provider_config() {
+        out.push("-c".to_string());
+        out.push(format!("{key}={value}"));
+    }
+    out
+}
+
 /// `codex app-server` arguments that select the ChatGPT plan provider.
 pub fn app_server_args() -> Vec<String> {
-    vec![
+    let mut args = vec![
         "app-server".to_string(),
         "--listen".to_string(),
         "stdio://".to_string(),
-        "-c".to_string(),
-        format!("model_provider=\"{MODEL_PROVIDER}\""),
-        "-c".to_string(),
-        format!("model_providers.{MODEL_PROVIDER}.name=\"ChatGPT plan\""),
-        "-c".to_string(),
-        format!("model_providers.{MODEL_PROVIDER}.base_url=\"https://api.openai.com/v1\""),
-        "-c".to_string(),
-        format!("model_providers.{MODEL_PROVIDER}.env_key=\"{ENV_ACCESS_TOKEN}\""),
-        "-c".to_string(),
-        format!("model_providers.{MODEL_PROVIDER}.wire_api=\"responses\""),
-        "-c".to_string(),
-        format!(
-            "model_providers.{MODEL_PROVIDER}.requires_openai_auth=false"
-        ),
-        "-c".to_string(),
-        format!("model_providers.{MODEL_PROVIDER}.supports_websockets=false"),
-    ]
+    ];
+    args.extend(config_args());
+    args
+}
+
+/// `codex exec` arguments for an unattended plan-usage run inside a
+/// sandbox. The prompt itself is appended as the final argv by the caller.
+/// Keeps Codex's own workspace-write sandbox as defense-in-depth (the
+/// E2B sandbox is the outer layer). No `-m`: Codex resolves its default
+/// model through the overridden provider.
+pub fn exec_args(workdir: &str, result_file: &str) -> Vec<String> {
+    let mut args = vec![
+        "exec".to_string(),
+        "-C".to_string(),
+        workdir.to_string(),
+        "--sandbox".to_string(),
+        "workspace-write".to_string(),
+        "--json".to_string(),
+        "-o".to_string(),
+        result_file.to_string(),
+        "--ignore-user-config".to_string(),
+    ];
+    args.extend(config_args());
+    args
 }
 
 /// `initialize` params. `name` must match the SIWC `agent_name_hint`.
@@ -85,6 +133,18 @@ mod tests {
         assert_eq!(p["clientInfo"]["name"], AGENT_NAME);
         assert_eq!(p["clientInfo"]["title"], "Don-a-Token");
         assert_eq!(p["clientInfo"]["version"], "0.1.0");
+    }
+
+    #[test]
+    fn exec_args_are_unattended_and_plan_routed() {
+        let args = exec_args("/work/repo", "/work/result.txt");
+        let joined = args.join(" ");
+        assert!(joined.starts_with("exec -C /work/repo"));
+        assert!(joined.contains("--sandbox workspace-write"));
+        assert!(joined.contains("--ignore-user-config"));
+        assert!(joined.contains("model_provider=\"openai_chatgpt_plan\""));
+        assert!(joined.contains("env_key=\"ACCESS_TOKEN\""));
+        assert!(!joined.contains("dangerously-bypass"));
     }
 
     #[test]

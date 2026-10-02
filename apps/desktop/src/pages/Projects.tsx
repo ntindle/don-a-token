@@ -145,9 +145,24 @@ export default function Projects({
             }
           />
         </label>
+        <label className="row">
+          <span>Contribution token</span>
+          <input
+            type="password"
+            placeholder="ghp_… (interim)"
+            value={settings.githubToken ?? ""}
+            onChange={(e) =>
+              onChange({
+                ...settings,
+                githubToken: e.target.value.trim() || null,
+              })
+            }
+          />
+        </label>
         <p className="fineprint">
-          OAuth-based GitHub linking (and other forges) arrives after the auth
-          spike.
+          Interim: a classic PAT with repo scope so jobs can push branches
+          and open PRs. Short-lived per-job tokens via a GitHub App replace
+          this next. Without a token, jobs stop after committing locally.
         </p>
       </div>
 

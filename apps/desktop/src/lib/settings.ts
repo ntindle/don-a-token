@@ -33,6 +33,8 @@ export interface Settings {
   embedEndpoint: string;
   /** E2B team API key (Cloud) or Embed install key. TODO: move to OS keychain. */
   e2bApiKey: string | null;
+  /** Interim contribution credential for opening PRs. GitHub App tokens are the follow-up. */
+  githubToken: string | null;
   seenPlanModal: boolean;
   onboardingStep: OnboardingStep;
 }
@@ -54,6 +56,7 @@ export const DEFAULT_SETTINGS: Settings = {
   runnerBackend: "e2b-cloud",
   embedEndpoint: "http://127.0.0.1:3000",
   e2bApiKey: null,
+  githubToken: null,
   seenPlanModal: false,
   onboardingStep: "welcome",
 };

@@ -2,11 +2,18 @@ import { invoke } from "@tauri-apps/api/core";
 import { isTauri, type RunnerConfig } from "./tauri";
 import type { Settings } from "./settings";
 import registry from "../../../../projects/registry.json";
+import phasePrompt from "../../../../prompt-packs/phase/prompt.md?raw";
+
+const PROMPT_PACKS: Record<string, string> = { phase: phasePrompt };
 
 interface SchedulerProject {
   id: string;
   template: string;
-  command: string[];
+  repo: string;
+  baseBranch: string;
+  prompt: string;
+  checks: string[];
+  promptPack: string;
   maxMinutes: number;
 }
 
@@ -14,15 +21,8 @@ interface SchedulerConfig {
   rules: Settings["rules"];
   projects: SchedulerProject[];
   runner: RunnerConfig;
-}
-
-/**
- * Probe command until prompt packs land: proves the full loop
- * (verdict → submit → sandbox → output → log) without needing a
- * real job template.
- */
-function probeCommand(projectId: string): string[] {
-  return ["sh", "-c", `echo don-a-token probe for ${projectId}`];
+  donor: string | null;
+  githubToken: string | null;
 }
 
 export function buildSchedulerConfig(settings: Settings): SchedulerConfig {
@@ -31,11 +31,17 @@ export function buildSchedulerConfig(settings: Settings): SchedulerConfig {
     (id) => {
       const p = byId.get(id);
       if (!p || p.status !== "active") return [];
+      const prompt = PROMPT_PACKS[p.job.prompt_pack];
+      if (!prompt) return [];
       return [
         {
           id: p.id,
           template: p.job.template,
-          command: probeCommand(p.id),
+          repo: p.repo,
+          baseBranch: p.job.contribution.base_branch,
+          prompt,
+          checks: p.job.checks,
+          promptPack: p.job.prompt_pack,
           maxMinutes: Math.min(
             p.job.max_minutes_per_job,
             settings.rules.maxMinutesPerJob,
@@ -71,13 +77,25 @@ export function buildSchedulerConfig(settings: Settings): SchedulerConfig {
     case "docker-local":
       // No local-container backend yet: sync with no projects so the
       // scheduler idles instead of running against a stale config.
-      return { rules: settings.rules, projects: [], runner: {
-        api_base: "http://127.0.0.1:3000",
-        api_key: null,
-        sandbox_base: null,
-      } };
+      return {
+        rules: settings.rules,
+        projects: [],
+        runner: {
+          api_base: "http://127.0.0.1:3000",
+          api_key: null,
+          sandbox_base: null,
+        },
+        donor: settings.githubUsername,
+        githubToken: settings.githubToken,
+      };
   }
-  return { rules: settings.rules, projects, runner };
+  return {
+    rules: settings.rules,
+    projects,
+    runner,
+    donor: settings.githubUsername,
+    githubToken: settings.githubToken,
+  };
 }
 
 /** Push settings to the background scheduler. No-op outside Tauri. */

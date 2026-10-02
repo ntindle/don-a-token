@@ -28,6 +28,8 @@ pub struct JobSpec {
     pub template: String,
     pub max_tokens_per_job: u64,
     pub max_minutes_per_job: u32,
+    pub checks: Vec<String>,
+    pub prompt_pack: String,
     pub contribution: Contribution,
 }
 
@@ -132,6 +134,8 @@ mod tests {
                     "template": "don-a-token-rust",
                     "max_tokens_per_job": 50000,
                     "max_minutes_per_job": 30,
+                    "checks": ["cargo test"],
+                    "prompt_pack": "phase",
                     "contribution": {
                         "method": "pull-request",
                         "base_branch": "main",
