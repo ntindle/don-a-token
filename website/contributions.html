@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Contributions — Don-a-Token</title>
+  <meta name="description" content="Track donated compute and the pull requests it produced." />
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <header class="site-head">
+    <nav class="nav">
+      <a class="brand" href="/">Don-a-Token</a>
+      <span class="nav-links">
+        <a href="/projects.html">Projects</a>
+        <a href="/contributions.html">Contributions</a>
+        <a href="/apply.html">Apply</a>
+        <a href="https://github.com/ntindle/don-a-token">GitHub</a>
+      </span>
+    </nav>
+  </header>
+
+  <main>
+    <h1>Contributions tracker</h1>
+    <p class="lede">
+      Every donated job that lands as a pull request shows up here, with its
+      project, token cost, and outcome. Donors can prove their impact;
+      projects can audit everything automation opened.
+    </p>
+
+    <table class="tracker">
+      <thead>
+        <tr>
+          <th>Date</th>
+          <th>Project</th>
+          <th>Pull request</th>
+          <th>Tokens</th>
+          <th>Outcome</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td colspan="5" class="fineprint">
+            No donations yet — the live tracker lights up with the first
+            landed PR. Attribution pipeline: each PR footer carries the
+            donor's linked identity plus the harness client id as provenance.
+          </td>
+        </tr>
+      </tbody>
+    </table>
+
+    <section>
+      <h2>How attribution works</h2>
+      <ul>
+        <li>Donors link their GitHub identity in the desktop app.</li>
+        <li>Jobs open PRs through short-lived, per-job credentials — never the donor's long-lived tokens.</li>
+        <li>Each PR footer records the donor, the project job spec version, and the harness client id.</li>
+        <li>Projects can verify any PR against this tracker and the registry history.</li>
+      </ul>
+    </section>
+  </main>
+
+  <footer class="site-foot">
+    <nav class="social" aria-label="Social links">
+      <a href="https://github.com/ntindle/don-a-token">GitHub</a>
+      <a href="#" title="TODO: Bluesky handle">Bluesky</a>
+      <a href="#" title="TODO: X/Twitter handle">Twitter</a>
+      <a href="#" title="TODO: Discord invite">Discord</a>
+    </nav>
+    <p class="fineprint">Don-a-Token is open source under Apache-2.0.</p>
+  </footer>
+</body>
+</html>

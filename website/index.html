@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Don-a-Token — donate spare ChatGPT plan capacity to open source</title>
+  <meta name="description" content="Don-a-Token runs small, sandboxed Codex jobs for open-source projects you pick, using ChatGPT plan capacity you weren't going to use anyway. Folding@home for tokens." />
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <header class="site-head">
+    <nav class="nav">
+      <a class="brand" href="/">Don-a-Token</a>
+      <span class="nav-links">
+        <a href="/projects.html">Projects</a>
+        <a href="/contributions.html">Contributions</a>
+        <a href="/apply.html">Apply</a>
+        <a href="https://github.com/ntindle/don-a-token">GitHub</a>
+      </span>
+    </nav>
+  </header>
+
+  <main>
+    <section class="hero">
+      <h1>Your unused tokens can fix open source.</h1>
+      <p class="lede">
+        Don-a-Token is a desktop app that donates spare ChatGPT plan capacity
+        to open-source projects you choose — small, sandboxed Codex jobs that
+        land as reviewable pull requests. Think Folding@home, for tokens.
+      </p>
+      <div class="cta-row">
+        <a class="btn btn-primary" href="https://github.com/ntindle/don-a-token/releases/latest">Download the app</a>
+        <a class="btn" href="/projects.html">Browse projects</a>
+        <a class="btn" href="/apply.html">Apply as a project</a>
+      </div>
+      <p class="fineprint">Mac, Windows, and Linux. Free and open source (Apache-2.0).</p>
+    </section>
+
+    <section>
+      <h2>How it works</h2>
+      <ol class="steps">
+        <li>
+          <strong>Sign in with ChatGPT.</strong>
+          The app registers a user-defined agent with ChatGPT plan usage.
+          Only eligible inference requests touch your plan — never your
+          conversations.
+        </li>
+        <li>
+          <strong>Set your rules.</strong>
+          Cap donations (say, at most 10% of remaining usage), keep a reserve
+          floor, set quiet hours, pause, or skip a week — from the app or the
+          tray menu.
+        </li>
+        <li>
+          <strong>Pick your projects.</strong>
+          Choose from a manually approved registry. Jobs run unattended in
+          isolated sandboxes (E2B Embed) and contribute back as PRs
+          attributed to you.
+        </li>
+      </ol>
+    </section>
+
+    <section>
+      <h2>Built for trust</h2>
+      <ul>
+        <li><strong>Isolation first:</strong> unattended model runs execute in Firecracker sandboxes via E2B Embed, never on your bare desktop.</li>
+        <li><strong>Attribution always:</strong> every contribution carries your linked identity plus the harness client id as provenance.</li>
+        <li><strong>Curated registry:</strong> projects are manually approved and reviewed with maintainers before they accept donations.</li>
+        <li><strong>You stay in control:</strong> usage-limit errors halt donations immediately; pause and skip are one click away.</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>Get started</h2>
+      <div class="cta-row">
+        <a class="btn btn-primary" href="https://github.com/ntindle/don-a-token/releases/latest">Download the app</a>
+        <a class="btn" href="/apply.html">List your project</a>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-foot">
+    <nav class="social" aria-label="Social links">
+      <a href="https://github.com/ntindle/don-a-token">GitHub</a>
+      <!-- TODO: replace with real handles before launch -->
+      <a href="#" title="TODO: Bluesky handle">Bluesky</a>
+      <a href="#" title="TODO: X/Twitter handle">Twitter</a>
+      <a href="#" title="TODO: Discord invite">Discord</a>
+    </nav>
+    <p class="fineprint">Don-a-Token is open source under Apache-2.0. ChatGPT plan usage requires a compatible ChatGPT plan.</p>
+  </footer>
+</body>
+</html>

@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Projects — Don-a-Token</title>
+  <meta name="description" content="Open-source projects accepting donated compute through Don-a-Token." />
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <header class="site-head">
+    <nav class="nav">
+      <a class="brand" href="/">Don-a-Token</a>
+      <span class="nav-links">
+        <a href="/projects.html">Projects</a>
+        <a href="/contributions.html">Contributions</a>
+        <a href="/apply.html">Apply</a>
+        <a href="https://github.com/ntindle/don-a-token">GitHub</a>
+      </span>
+    </nav>
+  </header>
+
+  <main>
+    <h1>Projects</h1>
+    <p class="lede">
+      Every listing is manually approved. Maintainers work with us to tune
+      their job spec — starting prompt, sandbox template, per-job caps — until
+      donated work lands as high-quality, reviewable pull requests.
+    </p>
+
+    <div id="live"><p class="fineprint">Loading the live registry…</p></div>
+
+    <noscript>
+      <ul class="project-list">
+        <li class="project">
+          <h3>Phase</h3>
+          <p>Rust-based Phase tooling. Jobs triage issues, write tests, and open small, reviewable pull requests.</p>
+          <p><a href="https://github.com/phase-rs/phase">https://github.com/phase-rs/phase</a></p>
+        </li>
+      </ul>
+    </noscript>
+
+    <section>
+      <h2>Run a project?</h2>
+      <p>
+        If you maintain an open-source project with a steady stream of
+        well-scoped work — tests, triage, docs, refactors — we'd like to talk.
+      </p>
+      <div class="cta-row">
+        <a class="btn btn-primary" href="/apply.html">Apply to list your project</a>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-foot">
+    <nav class="social" aria-label="Social links">
+      <a href="https://github.com/ntindle/don-a-token">GitHub</a>
+      <a href="#" title="TODO: Bluesky handle">Bluesky</a>
+      <a href="#" title="TODO: X/Twitter handle">Twitter</a>
+      <a href="#" title="TODO: Discord invite">Discord</a>
+    </nav>
+    <p class="fineprint">Don-a-Token is open source under Apache-2.0.</p>
+  </footer>
+
+  <script>
+    // Live registry, same artifact the desktop app pulls from releases.
+    fetch("https://github.com/ntindle/don-a-token/releases/latest/download/registry.json")
+      .then((r) => { if (!r.ok) throw new Error("registry fetch failed"); return r.json(); })
+      .then((reg) => {
+        const el = document.getElementById("live");
+        el.innerHTML = "";
+        const ul = document.createElement("ul");
+        ul.className = "project-list";
+        for (const p of reg.projects) {
+          const li = document.createElement("li");
+          li.className = "project";
+          const status = p.status === "active" ? "accepting donations" : p.status;
+          li.innerHTML =
+            "<h3></h3><p></p><p></p><p class='fineprint'></p>";
+          li.children[0].textContent = p.name;
+          li.children[1].textContent = p.description;
+          const a = document.createElement("a");
+          a.href = p.repo; a.textContent = p.repo;
+          li.children[2].appendChild(a);
+          li.children[3].textContent =
+            status + " · up to " + p.job.max_tokens_per_job.toLocaleString() +
+            " tokens / " + p.job.max_minutes_per_job + " min per job";
+          ul.appendChild(li);
+        }
+        el.appendChild(ul);
+        const note = document.createElement("p");
+        note.className = "fineprint";
+        note.textContent = "Registry v" + reg.version + ", updated " + reg.updated_at + ".";
+        el.appendChild(note);
+      })
+      .catch(() => {
+        document.getElementById("live").innerHTML =
+          "<p>The live registry isn't published yet — the first release ships it. Meanwhile, our launch project is <a href='https://github.com/phase-rs/phase'>phase-rs/phase</a>.</p>";
+      });
+  </script>
+</body>
+</html>

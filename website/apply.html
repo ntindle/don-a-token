@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Apply — Don-a-Token</title>
+  <meta name="description" content="Apply to list your open-source project on Don-a-Token and receive donated compute." />
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <header class="site-head">
+    <nav class="nav">
+      <a class="brand" href="/">Don-a-Token</a>
+      <span class="nav-links">
+        <a href="/projects.html">Projects</a>
+        <a href="/contributions.html">Contributions</a>
+        <a href="/apply.html">Apply</a>
+        <a href="https://github.com/ntindle/don-a-token">GitHub</a>
+      </span>
+    </nav>
+  </header>
+
+  <main>
+    <h1>Apply as a project</h1>
+    <p class="lede">
+      Listing is a collaboration, not a form submission into the void. We work
+      with you to shape a high-quality job spec for the harness (Codex, in
+      sandboxes) — starting prompt, task sizing, tests, and review flow —
+      before your project accepts its first donation.
+    </p>
+
+    <!-- Automated endpoint (/api/apply on Cloudflare) lands with the launch.
+         Until then, applications go through GitHub issues. See website/README. -->
+    <form class="apply" id="apply-form">
+      <div class="field">
+        <label for="project-name">Project name</label>
+        <input id="project-name" name="project-name" type="text" required autocomplete="organization" />
+      </div>
+
+      <div class="field">
+        <label for="project-url">Project URL</label>
+        <p class="hint">Homepage, docs, or wherever a donor would learn what you do.</p>
+        <input id="project-url" name="project-url" type="url" required placeholder="https://" />
+      </div>
+
+      <div class="field">
+        <label for="repo-url">Repository URL</label>
+        <p class="hint">GitHub repo that will receive pull requests.</p>
+        <input id="repo-url" name="repo-url" type="url" required placeholder="https://github.com/org/repo" />
+      </div>
+
+      <div class="field">
+        <label for="contact-name">Contact name</label>
+        <input id="contact-name" name="contact-name" type="text" required autocomplete="name" />
+      </div>
+
+      <div class="field">
+        <label for="contact-email">Contact email</label>
+        <input id="contact-email" name="contact-email" type="email" required autocomplete="email" />
+      </div>
+
+      <div class="field">
+        <label for="contact-chat">Chat handle (optional)</label>
+        <p class="hint">Discord, Slack, Matrix — wherever we can reach you for the working sessions.</p>
+        <input id="contact-chat" name="contact-chat" type="text" placeholder="you:discord" />
+      </div>
+
+      <div class="field">
+        <label for="starting-prompt">Starting prompt</label>
+        <p class="hint">
+          The seed instructions each donated job starts from: what the agent
+          should do, what good looks like, what to never touch. Rough is fine —
+          we refine it together.
+        </p>
+        <textarea id="starting-prompt" name="starting-prompt" required></textarea>
+      </div>
+
+      <div class="field">
+        <label for="scale-plan">How will you handle automatic contributions at scale?</label>
+        <p class="hint">
+          Review bandwidth, CI capacity, merge policy, triage process — how
+          does a stream of small machine-authored PRs fit your workflow
+          without burying maintainers?
+        </p>
+        <textarea id="scale-plan" name="scale-plan" required></textarea>
+      </div>
+
+      <div class="field">
+        <label for="task-shape">What work should donations do?</label>
+        <p class="hint">
+          e.g. issue triage, missing tests, docs, dependency bumps, refactors.
+          Links to representative issues help a lot.
+        </p>
+        <textarea id="task-shape" name="task-shape"></textarea>
+      </div>
+
+      <div class="field">
+        <label for="base-branch">Base branch for PRs</label>
+        <input id="base-branch" name="base-branch" type="text" placeholder="main" />
+      </div>
+
+      <div class="field">
+        <label for="notes">Anything else</label>
+        <textarea id="notes" name="notes" style="min-height: 80px"></textarea>
+      </div>
+
+      <button class="btn btn-primary" type="submit">Submit application</button>
+      <p class="fineprint" id="apply-status"></p>
+    </form>
+  </main>
+
+  <footer class="site-foot">
+    <nav class="social" aria-label="Social links">
+      <a href="https://github.com/ntindle/don-a-token">GitHub</a>
+      <a href="#" title="TODO: Bluesky handle">Bluesky</a>
+      <a href="#" title="TODO: X/Twitter handle">Twitter</a>
+      <a href="#" title="TODO: Discord invite">Discord</a>
+    </nav>
+    <p class="fineprint">Don-a-Token is open source under Apache-2.0.</p>
+  </footer>
+
+  <script>
+    document.getElementById("apply-form").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const status = document.getElementById("apply-status");
+      const data = Object.fromEntries(new FormData(e.target).entries());
+      try {
+        const res = await fetch("/api/apply", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(data),
+        });
+        if (!res.ok) throw new Error("endpoint not live");
+        status.textContent = "Application received — we'll be in touch within a week.";
+        e.target.reset();
+      } catch {
+        // Interim channel: prefill a GitHub application issue.
+        const body = Object.entries(data)
+          .map(([k, v]) => `### ${k}\n\n${v || "(blank)"}`)
+          .join("\n\n");
+        const url =
+          "https://github.com/ntindle/don-a-token/issues/new?title=" +
+          encodeURIComponent(`Project application: ${data["project-name"] || ""}`) +
+          "&body=" + encodeURIComponent(body);
+        status.innerHTML = "";
+        status.append(
+          "The automated endpoint isn't live yet — ",
+        );
+        const a = document.createElement("a");
+        a.href = url;
+        a.textContent = "open your application as a GitHub issue instead";
+        status.append(a, " (prefilled with everything above).");
+      }
+    });
+  </script>
+</body>
+</html>

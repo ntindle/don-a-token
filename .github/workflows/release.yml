@@ -1,0 +1,66 @@
+name: Release
+
+# Tag a release with `git tag v0.1.0 && git push --tag`.
+# Ships: desktop installers (Mac/Windows/Linux), the updater manifest
+# (latest.json), and the projects registry (registry.json) as artifacts.
+#
+# One-time setup:
+#   1. `pnpm tauri signer generate` (keeps the key OUT of the repo).
+#   2. Paste the public key into apps/desktop/src-tauri/tauri.conf.json.
+#   3. Save the private key + password as repo secrets:
+#      TAURI_SIGNING_PRIVATE_KEY / TAURI_SIGNING_PRIVATE_KEY_PASSWORD.
+# Bundle icons regenerate deterministically from icons/icon.png below.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            args: ""
+          - os: macos-latest
+            args: --target universal-apple-darwin
+          - os: windows-latest
+            args: ""
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Generate bundle icons (incl. .icns)
+        run: pnpm --filter @don-a-token/desktop tauri icon apps/desktop/src-tauri/icons/icon.png
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: don-a-token ${{ github.ref_name }}
+          releaseDraft: true
+          projectPath: apps/desktop
+          args: ${{ matrix.args }}
+
+  registry:
+    name: Publish projects registry
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - uses: actions/checkout@v4
+      - name: Upload registry.json to the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: >
+          gh release upload ${{ github.ref_name }}
+          projects/registry.json --clobber

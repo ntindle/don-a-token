@@ -1,0 +1,11 @@
+{
+  "name": "don-a-token",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Donate spare ChatGPT plan capacity to open-source projects. Think Folding@home for tokens.",
+  "scripts": {
+    "dev:desktop": "pnpm --filter @don-a-token/desktop dev",
+    "build:desktop": "pnpm --filter @don-a-token/desktop build",
+    "test:core": "cargo test -p don-a-token-core"
+  }
+}

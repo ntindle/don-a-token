@@ -1,0 +1,46 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "don-a-token",
+  "version": "0.1.0",
+  "identifier": "com.ntindle.donatoken",
+  "build": {
+    "devUrl": "http://localhost:1420",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "Don-a-Token",
+        "width": 960,
+        "height": 680,
+        "minWidth": 720,
+        "minHeight": 520
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; connect-src 'self' https://auth.openai.com https://api.openai.com https://chatgpt.com https://github.com ipc: http://ipc.localhost"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ]
+  },
+  "plugins": {
+    "updater": {
+      "active": true,
+      "dialog": true,
+      "endpoints": [
+        "https://github.com/ntindle/don-a-token/releases/latest/download/latest.json"
+      ],
+      "pubkey": "TODO: generate with `tauri signer generate` and paste the public key here"
+    }
+  }
+}

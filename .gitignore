@@ -1,0 +1,22 @@
+/target
+**/target/
+node_modules/
+dist/
+build/
+*.log
+.env
+.env.*
+!.env.example
+.DS_Store
+Thumbs.db
+# Tauri
+apps/desktop/src-tauri/target/
+apps/desktop/src-tauri/gen/
+# Updater signing keys - NEVER commit
+*.key
+*.pub
+# Local SIWC credentials (live outside the repo, but guard against accidents)
+credentials*.json
+auth.json
+# pnpm
+.pnpm-store/

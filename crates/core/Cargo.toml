@@ -1,0 +1,17 @@
+[package]
+name = "don-a-token-core"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+description = "Portable core for don-a-token: SIWC auth types, rules engine, projects registry, runner abstraction"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+uuid = { version = "1", features = ["v4"] }
+sha2 = "0.10"
+base64 = "0.22"
+chrono = { version = "0.4", features = ["serde", "clock"] }
+thiserror = "2"
+rand = "0.9"
+url = "2"

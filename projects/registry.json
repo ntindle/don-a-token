@@ -1,0 +1,25 @@
+{
+  "version": 1,
+  "updated_at": "2026-10-01",
+  "projects": [
+    {
+      "id": "phase",
+      "name": "Phase",
+      "repo": "https://github.com/phase-rs/phase",
+      "description": "First donation target: Rust-based Phase tooling. Jobs triage issues, write tests, and open small, reviewable pull requests.",
+      "homepage": "https://github.com/phase-rs/phase",
+      "status": "active",
+      "job": {
+        "kind": "codex-task",
+        "template": "don-a-token-rust",
+        "max_tokens_per_job": 50000,
+        "max_minutes_per_job": 30,
+        "contribution": {
+          "method": "pull-request",
+          "base_branch": "main",
+          "attribution_footer": true
+        }
+      }
+    }
+  ]
+}

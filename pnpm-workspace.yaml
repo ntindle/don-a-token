@@ -1,0 +1,7 @@
+packages:
+  - "apps/*"
+
+# pnpm blocks dependency install scripts by default; esbuild needs its
+# postinstall to fetch the platform binary that powers vite.
+onlyBuiltDependencies:
+  - esbuild

@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/ntindle/don-a-token/blob/main/projects/schema.json",
+  "title": "don-a-token projects registry",
+  "type": "object",
+  "required": ["version", "updated_at", "projects"],
+  "properties": {
+    "version": { "type": "integer", "minimum": 1 },
+    "updated_at": { "type": "string" },
+    "projects": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "name", "repo", "description", "homepage", "status", "job"],
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "name": { "type": "string", "minLength": 1 },
+          "repo": { "type": "string", "pattern": "^https://github\\.com/" },
+          "description": { "type": "string", "minLength": 1 },
+          "homepage": { "type": "string" },
+          "status": { "enum": ["active", "paused"] },
+          "job": {
+            "type": "object",
+            "required": ["kind", "template", "max_tokens_per_job", "max_minutes_per_job", "contribution"],
+            "properties": {
+              "kind": { "type": "string", "minLength": 1 },
+              "template": { "type": "string", "minLength": 1 },
+              "max_tokens_per_job": { "type": "integer", "minimum": 1 },
+              "max_minutes_per_job": { "type": "integer", "minimum": 1 },
+              "contribution": {
+                "type": "object",
+                "required": ["method", "base_branch", "attribution_footer"],
+                "properties": {
+                  "method": { "type": "string", "minLength": 1 },
+                  "base_branch": { "type": "string", "minLength": 1 },
+                  "attribution_footer": { "type": "boolean" }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
