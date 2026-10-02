@@ -136,6 +136,7 @@ impl E2bRunner {
         let base = e2b::resolve_sandbox_base(&self.cfg, sandbox.domain.as_deref());
         let url = format!("{base}/process.Process/Start");
         let body = e2b::start_body(cmd, args, envs, cwd);
+        let raw = serde_json::to_vec(&body).map_err(|e| format!("start body: {e}"))?;
         let mut req = self
             .client
             .post(&url)
@@ -146,7 +147,7 @@ impl E2bRunner {
             req = req.header(e2b::ACCESS_TOKEN_HEADER, token);
         }
         let res = req
-            .json(&body)
+            .body(e2b::envelope_message(&raw))
             .send()
             .await
             .map_err(|e| format!("start process: {e}"))?;
@@ -589,6 +590,49 @@ mod tests {
         assert!(seen.contains("content-type: application/connect+json"), "wrong rpc encoding");
 
         server.abort();
+    }
+
+    /// Live smoke against a real backend (Embed or Cloud). Ignored by
+    /// default; run explicitly with the backend's key:
+    /// `E2B_API_KEY=e2b_... E2B_API_URL=http://127.0.0.1:3000 cargo test
+    /// -- --ignored live_`. Creates one sandbox, runs `echo`, kills it.
+    #[tokio::test]
+    #[ignore]
+    async fn live_embed_smoke() {
+        let base =
+            std::env::var("E2B_API_URL").unwrap_or_else(|_| "http://127.0.0.1:3000".to_string());
+        let key = std::env::var("E2B_API_KEY")
+            .expect("live test needs E2B_API_KEY (Embed: `docker compose logs ready`)");
+        let runner = E2bRunner::new(E2bConfig {
+            api_base: base,
+            api_key: Some(key),
+            sandbox_base: None,
+        })
+        .unwrap();
+        let sandbox = runner
+            .create_sandbox("base", 300, serde_json::json!({}), serde_json::json!({}))
+            .await
+            .expect("create sandbox");
+        // Always release the sandbox (small nodes fit exactly one).
+        let run = runner
+            .run_command(
+                &sandbox,
+                "echo",
+                &["hello-live".to_string()],
+                &serde_json::json!({}),
+                None,
+                Duration::from_secs(60),
+            )
+            .await;
+        let killed = runner.kill_sandbox(&sandbox.sandbox_id).await;
+        let out = run.expect("run echo");
+        assert!(out.succeeded());
+        assert!(
+            String::from_utf8_lossy(&out.stdout).contains("hello-live"),
+            "unexpected stdout: {:?}",
+            String::from_utf8_lossy(&out.stdout)
+        );
+        assert!(killed.unwrap(), "kill sandbox");
     }
 
     #[tokio::test]

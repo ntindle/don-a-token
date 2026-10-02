@@ -227,6 +227,18 @@ pub struct Envelope {
     pub payload: Vec<u8>,
 }
 
+/// Wrap one payload in a Connect streaming envelope: 1 flag byte
+/// (0x00) + 4-byte big-endian length + payload. `Start` is
+/// server-streaming, so the request body must be enveloped too —
+/// envd rejects a bare JSON body as a protocol error.
+pub fn envelope_message(payload: &[u8]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(5 + payload.len());
+    out.push(0x00);
+    out.extend_from_slice(&(payload.len() as u32).to_be_bytes());
+    out.extend_from_slice(payload);
+    out
+}
+
 /// Drain complete envelopes from the front of `buf`, leaving any partial
 /// envelope buffered. Framing: 1 flag byte + 4-byte big-endian length.
 pub fn drain_envelopes(buf: &mut Vec<u8>) -> Vec<Envelope> {
@@ -293,6 +305,18 @@ mod tests {
             sandbox_base: Some("http://proxy:4000/".to_string()),
         };
         assert_eq!(resolve_sandbox_base(&cfg, None), "http://proxy:4000");
+    }
+
+    #[test]
+    fn envelope_roundtrips_through_drain() {
+        let msg = envelope_message(b"{}");
+        assert_eq!(&msg[..5], &[0x00, 0x00, 0x00, 0x00, 0x02]);
+        let mut buf = msg.clone();
+        let envs = drain_envelopes(&mut buf);
+        assert_eq!(envs.len(), 1);
+        assert!(!envs[0].end);
+        assert_eq!(envs[0].payload, b"{}");
+        assert!(buf.is_empty());
     }
 
     #[test]

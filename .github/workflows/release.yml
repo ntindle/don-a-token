@@ -37,6 +37,13 @@ jobs:
         with:
           node-version: 22
           cache: pnpm
+      - name: Install Linux bundle deps
+        if: runner.os == 'Linux'
+        run: >
+          sudo apt-get update &&
+          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl
+          wget file libxdo-dev libssl-dev libayatana-appindicator3-dev
+          librsvg2-dev
       - run: pnpm install --frozen-lockfile
       - name: Generate bundle icons (incl. .icns)
         run: pnpm --filter @don-a-token/desktop tauri icon apps/desktop/src-tauri/icons/icon.png
