@@ -16,6 +16,9 @@ on:
     tags: ["v*"]
   workflow_dispatch:
 
+permissions:
+  contents: write # create the release + upload bundles, latest.json, registry.json
+
 jobs:
   build:
     strategy:
@@ -32,6 +35,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      - name: Add x86_64 target for universal macOS build
+        if: runner.os == 'macOS'
+        run: rustup target add x86_64-apple-darwin
       - uses: pnpm/action-setup@v4
         with:
           version: 9
