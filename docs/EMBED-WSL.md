@@ -36,18 +36,58 @@ Upstream `compose.yaml` is used with a backup at `compose.yaml.orig`.
 
 ## Bring-up after a WSL restart
 
-Hugepages don't survive reboot and one-shot `host-setup` won't re-run,
-so before the first sandbox after any restart, as root:
+A kernel reboot resets hugepages AND unloads `nbd`, and one-shot
+`host-setup` won't re-run, so after any restart (as root unless noted):
 
 ```sh
 echo 1 > /proc/sys/vm/compact_memory   # defrag; without this only ~20 pages reserve
 echo 512 > /proc/sys/vm/nr_hugepages
+cd ~/e2b && HUGEPAGES=512 PF_MIN_FREE_GIB=4 \
+  docker compose run --rm --no-deps host-setup   # reloads nbd/tun/kvm, sysctls, dirs
+docker compose restart orchestrator              # was crash-looping on missing nbd
 ```
 
 Then normal `up -d` (containers are `unless-stopped` and revive on
 their own). The API is reachable from Windows at
 `http://<wsl-ip>:3000` (`hostname -I`; localhost forwarding does not
 cover it). Key via `docker compose logs ready`.
+
+Without the `host-setup` re-run the orchestrator crash-loops with
+`failed to create device pool: ... NBD module not loaded` and every
+build fails with `no available build client` (503).
+
+## WSL idle auto-stop (read this before long jobs)
+
+WSL terminates an **idle distro ~15s after its last `wsl.exe`
+session exits** (`instanceIdleTimeout`, default 15000ms) — systemd
+services do NOT keep it alive — and shuts down the shared VM ~60s
+after the last distro stops (`vmIdleTimeout`, default 60000ms). Every
+stop kills dockerd, all stack containers, and any running build or
+sandbox; the next `wsl` command boots a fresh kernel (nbd/hugepages
+reset, see above). Previously this was masked by Docker Desktop's WSL
+integration sessions; when Desktop broke, the node started dying
+mid-build with `ECONNREFUSED`.
+
+Durable fix in `%USERPROFILE%\.wslconfig` (takes effect at the next
+`wsl --shutdown`):
+
+```ini
+[general]
+instanceIdleTimeout=-1
+
+[wsl2]
+vmIdleTimeout=-1
+autoMemoryReclaim=gradual   # else vmmemWSL never shrinks (page-cache bloat)
+```
+
+Until a shutdown applies it, hold the distro with a live client for
+the duration of any long work (build, verify, E2E):
+
+```powershell
+wsl -d Ubuntu -- sleep 3600   # keep alive until the job finishes
+```
+
+## Operating discipline (small node)
 
 ## Operating discipline (small node)
 
@@ -63,6 +103,27 @@ cover it). Key via `docker compose logs ready`.
   `cargo test --no-run` on phase plus the stack OOM'd the 31GB host
   (vmmemWSL never released; WSL went unresponsive). One heavy job at
   a time, and cap cargo jobs (`CARGO_BUILD_JOBS=4`).
+- **Build with 384MB builders on this node**
+  (`E2B_BUILD_MEM=384 E2B_BUILD_CPU=1`). Each build step resumes the
+  builder from snapshot, transiently needing ~2x builder memory in
+  hugetlb. Crashed sandboxes leak `HugePages_Rsvd` that no process
+  holds and only a reboot clears (seen stuck at 63); with that leak,
+  512MB builders fail resume with `mmap memfd: cannot allocate
+  memory`. Template sandboxes inherit build memory (v4 runs 384MB).
+- **Purge stale sandbox networking after unclean deaths.**
+  Crashed sandboxes leak netns (`ns-N`), host `veth-N` links, and
+  `10.11.0.0/24` routes; with zero sandboxes alive, delete them all
+  as root (`ip netns delete`, `ip link delete veth-N`) and restart
+  the orchestrator so its bookkeeping resets. (Stale NAT
+  MASQUERADE rules are harmless; leave them.) Docker `veth<hex>`
+  links are not E2B's — never touch those.
+- **JS SDK needs `E2B_SANDBOX_URL`.** Template scripts run from
+  Windows must export all three (`E2B_API_URL`, `E2B_API_KEY`,
+  `E2B_SANDBOX_URL=http://<wsl-ip>:3002`). Without the sandbox URL
+  the SDK builds cloud-style `https://49983-<id>.<domain>` URLs and
+  every `commands.run` fails with `Sandbox is probably not running
+  anymore` even though create/kill (API :3000) work. (Our Rust
+  client derives the proxy port from `api_base` automatically.)
 - Full reset (ghosts + stuck state):
   `docker compose down -v`, `--profile purge run --rm host-teardown`,
   `up` again. Nuclear option only.

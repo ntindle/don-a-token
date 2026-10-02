@@ -15,11 +15,15 @@ npm install
 npm run build          # builds alias `don-a-token-rust`
 ```
 
-Small nodes (11GB WSL2) need a small builder (512MB VMs are all the
-hugepage pool fits — see the memfd note in versioning):
+Small nodes (11GB WSL2, 512 hugepages) need a small builder. Build
+steps resume the builder sandbox from snapshot, which transiently
+needs ~2x the builder memory in hugetlb reservations, and crashed
+sandboxes leak `HugePages_Rsvd` that only a reboot clears — so 384MB
+builders are the safe size (512MB fails resume with `mmap memfd:
+cannot allocate memory` once ~60 pages are reserved):
 
 ```sh
-E2B_BUILD_CPU=1 E2B_BUILD_MEM=512 E2B_BUILD_DISK_MB=8192 npm run build -- don-a-token-rust-v2
+E2B_BUILD_CPU=1 E2B_BUILD_MEM=384 E2B_BUILD_DISK_MB=8192 npm run build -- don-a-token-rust-v4
 ```
 
 Always boot-verify a new build — the in-builder checks run with the
@@ -27,7 +31,8 @@ image ENV, but sandboxes don't inherit it, so only a real boot proves
 the toolchain resolves:
 
 ```sh
-node verify.mjs don-a-token-rust-v2   # needs E2B_API_KEY + E2B_API_URL in env/.env
+# needs E2B_API_KEY + E2B_API_URL + E2B_SANDBOX_URL in env/.env
+node verify.mjs don-a-token-rust-v4
 ```
 
 For Embed, point at the node: `E2B_API_URL=http://<embed-host>:3000`
