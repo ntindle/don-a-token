@@ -5,6 +5,8 @@
   "identifier": "com.ntindle.donatoken",
   "build": {
     "devUrl": "http://localhost:1420",
+    "beforeDevCommand": "pnpm dev",
+    "beforeBuildCommand": "pnpm build",
     "frontendDist": "../dist"
   },
   "app": {
