@@ -147,6 +147,11 @@ pub enum ProcEvent {
     KeepAlive,
 }
 
+/// Parse a Go `exec` status string ("exit status 0") into its code.
+fn parse_exit_status(status: &str) -> Option<i32> {
+    status.strip_prefix("exit status ")?.parse().ok()
+}
+
 /// Parse one NDJSON event line. `stdout`/`stderr` arrive base64-encoded
 /// per protobuf JSON mapping and are decoded here.
 pub fn parse_event_line(line: &str) -> Result<ProcEvent, CoreError> {
@@ -180,7 +185,23 @@ pub fn parse_event_line(line: &str) -> Result<ProcEvent, CoreError> {
         return Err(CoreError::InvalidRegistry("data event has no output".into()));
     }
     if let Some(end) = event.get("end") {
-        let exit_code = end.get("exitCode").and_then(Value::as_i64).unwrap_or(-1) as i32;
+        // envd reports Go-style `status` ("exit status 0") and no numeric
+        // code; older shapes may carry `exitCode`. Prefer the number.
+        let exit_code = end
+            .get("exitCode")
+            .and_then(Value::as_i64)
+            .map(|c| c as i32)
+            .or_else(|| end.get("status").and_then(Value::as_str).and_then(parse_exit_status))
+            .or_else(|| {
+                if end.get("exited").and_then(Value::as_bool) == Some(true)
+                    && end.get("error").is_none()
+                {
+                    Some(0)
+                } else {
+                    None
+                }
+            })
+            .unwrap_or(-1);
         let error = end.get("error").and_then(Value::as_str).map(str::to_string);
         return Ok(ProcEvent::Ended { exit_code, error });
     }
@@ -317,6 +338,20 @@ mod tests {
         assert!(!envs[0].end);
         assert_eq!(envs[0].payload, b"{}");
         assert!(buf.is_empty());
+    }
+
+    #[test]
+    fn end_event_parses_live_shapes() {
+        // Observed from real envd (no numeric code).
+        let live = parse_event_line(r#"{"event":{"end":{"exited":true, "status":"exit status 0"}}}"#).unwrap();
+        assert_eq!(live, ProcEvent::Ended { exit_code: 0, error: None });
+        let live_fail =
+            parse_event_line(r#"{"event":{"end":{"exited":true, "status":"exit status 3"}}}"#).unwrap();
+        assert_eq!(live_fail, ProcEvent::Ended { exit_code: 3, error: None });
+        // Older/documented shape with an explicit code still wins.
+        let legacy =
+            parse_event_line(r#"{"event":{"end":{"exitCode":0,"exited":true,"status":"ok"}}}"#).unwrap();
+        assert_eq!(legacy, ProcEvent::Ended { exit_code: 0, error: None });
     }
 
     #[test]

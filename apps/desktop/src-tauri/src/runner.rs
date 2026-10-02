@@ -177,6 +177,9 @@ async fn collect_stream(mut res: reqwest::Response) -> Result<CommandOutput, Str
             }
             let text = String::from_utf8(env.payload)
                 .map_err(|_| "envd sent non-utf8 event".to_string())?;
+            if std::env::var("E2B_DEBUG").is_ok() {
+                eprintln!("envd event: {text}");
+            }
             let event = e2b::parse_event_line(&text).map_err(|e| e.to_string())?;
             out.apply(&event);
         }
@@ -626,7 +629,14 @@ mod tests {
             .await;
         let killed = runner.kill_sandbox(&sandbox.sandbox_id).await;
         let out = run.expect("run echo");
-        assert!(out.succeeded());
+        assert!(
+            out.succeeded(),
+            "exit={:?} error={:?} stdout={:?} stderr={:?}",
+            out.exit_code,
+            out.error,
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr)
+        );
         assert!(
             String::from_utf8_lossy(&out.stdout).contains("hello-live"),
             "unexpected stdout: {:?}",
