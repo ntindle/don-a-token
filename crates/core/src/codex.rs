@@ -84,6 +84,10 @@ pub fn exec_args(workdir: &str, result_file: &str) -> Vec<String> {
         "-o".to_string(),
         result_file.to_string(),
         "--ignore-user-config".to_string(),
+        // Headless per E2B's Codex guide: auto-approve inside the sandbox
+        // (outer isolation layer) and skip git ownership checks.
+        "--full-auto".to_string(),
+        "--skip-git-repo-check".to_string(),
     ];
     args.extend(config_args());
     args
@@ -142,6 +146,8 @@ mod tests {
         assert!(joined.starts_with("exec -C /work/repo"));
         assert!(joined.contains("--sandbox workspace-write"));
         assert!(joined.contains("--ignore-user-config"));
+        assert!(joined.contains("--full-auto"));
+        assert!(joined.contains("--skip-git-repo-check"));
         assert!(joined.contains("model_provider=\"openai_chatgpt_plan\""));
         assert!(joined.contains("env_key=\"ACCESS_TOKEN\""));
         assert!(!joined.contains("dangerously-bypass"));

@@ -15,6 +15,7 @@ use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager, State};
 use tokio::sync::Mutex;
 
+use crate::publish;
 use crate::runner::{self, JobState, RunnerConfigArgs, SubmitJobArgs};
 
 const TICK_SECS: u64 = 60;
@@ -45,9 +46,24 @@ pub struct SchedulerConfig {
     pub github_token: Option<String>,
 }
 
+/// Host-side publish context for the active job. The sandbox only
+/// exports a patch; the branch/PR/title below are applied on the host.
+#[derive(Debug, Clone)]
+struct ActiveJobMeta {
+    project_id: String,
+    job_id: String,
+    repo: String,
+    base_branch: String,
+    branch: String,
+    pr_title: String,
+    pr_body: String,
+    github_token: Option<String>,
+}
+
 struct SchedulerData {
     config: Option<SchedulerConfig>,
     active_handle: Option<String>,
+    active_meta: Option<ActiveJobMeta>,
     last_project_id: Option<String>,
     last_finished: Option<DateTime<Utc>>,
     consecutive_failures: u32,
@@ -60,6 +76,7 @@ impl Default for SchedulerData {
         Self {
             config: None,
             active_handle: None,
+            active_meta: None,
             last_project_id: None,
             last_finished: None,
             consecutive_failures: 0,
@@ -115,12 +132,25 @@ pub fn log_line(
     status: &str,
     exit_code: Option<i32>,
 ) -> String {
+    log_line_detail(ts, project_id, handle_id, status, exit_code, None)
+}
+
+/// Same, with an optional detail (PR URL, pending-patch path, error).
+pub fn log_line_detail(
+    ts: &str,
+    project_id: &str,
+    handle_id: &str,
+    status: &str,
+    exit_code: Option<i32>,
+    detail: Option<&str>,
+) -> String {
     serde_json::json!({
         "ts": ts,
         "project_id": project_id,
         "handle_id": handle_id,
         "status": status,
         "exit_code": exit_code,
+        "detail": detail,
     })
     .to_string()
 }
@@ -272,7 +302,7 @@ async fn tick(app: &AppHandle) {
 }
 
 async fn finish_active(app: &AppHandle, handle_id: &str, status: &str, exit_code: Option<i32>) {
-    let (project_id, failed) = {
+    let (project_id, failed, stdout) = {
         let jobs = app.state::<JobState>();
         let guard = jobs.0.lock().await;
         match guard.get(handle_id) {
@@ -280,31 +310,128 @@ async fn finish_active(app: &AppHandle, handle_id: &str, status: &str, exit_code
                 let failed = !matches!(rec.status, don_a_token_core::runner::JobStatus::Succeeded);
                 // project id is the handle prefix ("{project}-{job}").
                 let project = handle_id.split('-').next().unwrap_or("?").to_string();
-                (project, failed)
+                (project, failed, rec.output.stdout.clone())
             }
-            None => ("?".to_string(), true),
+            None => ("?".to_string(), true, Vec::new()),
         }
     };
-    append_log(app, handle_id, &project_id, status, exit_code);
+    let meta = app.state::<SchedulerState>().0.lock().await.active_meta.take();
+    let (final_status, detail, failed) = match (failed, meta) {
+        (true, _) => (status.to_string(), None, true),
+        (false, None) => ("succeeded".to_string(), None, false),
+        (false, Some(meta)) => publish_succeeded(app, handle_id, &stdout, &meta).await,
+    };
+    append_log(app, handle_id, &project_id, &final_status, exit_code, detail.as_deref());
     let sched = app.state::<SchedulerState>();
     let mut data = sched.0.lock().await;
     data.active_handle = None;
     data.last_finished = Some(Utc::now());
     if failed {
         data.consecutive_failures += 1;
-        data.last_verdict = format!("job-failed: {status}");
+        data.last_verdict = format!("job-failed: {final_status}");
     } else {
         data.consecutive_failures = 0;
         data.halted_emitted = false;
-        data.last_verdict = "job-succeeded".to_string();
+        data.last_verdict = format!("job-{final_status}");
     }
 }
 
-fn append_log(app: &AppHandle, handle_id: &str, project_id: &str, status: &str, exit_code: Option<i32>) {
+/// Host-side publish for a succeeded sandbox run. Returns
+/// (log status, optional detail, counts-as-failure).
+async fn publish_succeeded(
+    app: &AppHandle,
+    handle_id: &str,
+    stdout: &[u8],
+    meta: &ActiveJobMeta,
+) -> (String, Option<String>, bool) {
+    match publish::extract_patch(stdout) {
+        publish::PatchOutcome::NoChanges => ("no-changes".to_string(), None, false),
+        publish::PatchOutcome::TooLarge => ("patch-too-large".to_string(), None, false),
+        publish::PatchOutcome::Missing => ("no-patch".to_string(), None, true),
+        publish::PatchOutcome::Patch { patch, result_md } => {
+            let Some(token) = meta.github_token.clone() else {
+                let path = save_pending_patch(app, handle_id, meta, &patch);
+                return ("needs-publish".to_string(), path, false);
+            };
+            if !publish::tools_available() {
+                let path = save_pending_patch(app, handle_id, meta, &patch);
+                return ("needs-publish".to_string(), path.or(Some("git/gh not on PATH".to_string())), false);
+            }
+            let owned = (
+                meta.repo.clone(),
+                meta.base_branch.clone(),
+                meta.branch.clone(),
+                meta.pr_title.clone(),
+                meta.pr_body.clone(),
+                result_md.clone(),
+                meta.job_id.clone(),
+                patch.clone(),
+            );
+            let res = tokio::task::spawn_blocking(move || {
+                let spec = publish::PublishSpec {
+                    repo_url: &owned.0,
+                    base_branch: &owned.1,
+                    branch: &owned.2,
+                    title: &owned.3,
+                    body: &owned.4,
+                    result_md: owned.5.as_deref(),
+                    github_token: &token,
+                    job_tag: &owned.6,
+                };
+                publish::publish_patch(&spec, &std::env::temp_dir(), &owned.7)
+            })
+            .await;
+            match res {
+                Ok(Ok(url)) => ("published".to_string(), Some(url), false),
+                Ok(Err(e)) => {
+                    let path = save_pending_patch(app, handle_id, meta, &patch);
+                    let detail = path.unwrap_or_else(|| truncate(&e, 200));
+                    ("publish-failed".to_string(), Some(detail), true)
+                }
+                Err(e) => ("publish-failed".to_string(), Some(format!("join: {e}")), true),
+            }
+        }
+    }
+}
+
+/// Stash an unpublished patch + its publish context under the app dir
+/// for later manual publishing. Returns the patch path when written.
+fn save_pending_patch(
+    app: &AppHandle,
+    handle_id: &str,
+    meta: &ActiveJobMeta,
+    patch: &str,
+) -> Option<String> {
+    let dir = app_dir(app).ok()?.join("pending-patches");
+    std::fs::create_dir_all(&dir).ok()?;
+    let safe: String = handle_id.chars().map(|c| if c.is_alphanumeric() || c == '-' { c } else { '_' }).collect();
+    let patch_path = dir.join(format!("{safe}.patch"));
+    std::fs::write(&patch_path, patch).ok()?;
+    let ctx = serde_json::json!({
+        "project_id": meta.project_id,
+        "job_id": meta.job_id,
+        "repo": meta.repo,
+        "base_branch": meta.base_branch,
+        "branch": meta.branch,
+        "pr_title": meta.pr_title,
+        "pr_body": meta.pr_body,
+    });
+    let _ = std::fs::write(dir.join(format!("{safe}.json")), ctx.to_string());
+    Some(patch_path.to_string_lossy().to_string())
+}
+
+fn append_log(
+    app: &AppHandle,
+    handle_id: &str,
+    project_id: &str,
+    status: &str,
+    exit_code: Option<i32>,
+    detail: Option<&str>,
+) {
     let Ok(dir) = app_dir(app) else {
         return;
     };
-    let line = log_line(&Utc::now().to_rfc3339(), project_id, handle_id, status, exit_code);
+    let line = log_line_detail(&Utc::now().to_rfc3339(), project_id, handle_id, status, exit_code, detail);
     if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(dir.join("donations.jsonl")) {
         use std::io::Write;
         let _ = writeln!(f, "{line}");
@@ -339,19 +466,20 @@ async fn submit_next(app: &AppHandle, config: &SchedulerConfig) {
     );
     let pr_title = format!("don-a-token({}): automated contribution {job_id}", spec.id);
     let pr_body = jobscript::pr_body(&spec.id, &footer);
-    let exec = jobscript::standard_exec_args("/work/job");
+    // Home-relative: sandboxes run as non-root `user`, so /work is not writable.
+    let exec = jobscript::standard_exec_args("/home/user/job");
     let bspec = jobscript::BootstrapSpec {
         repo_url: &spec.repo,
         base_branch: &spec.base_branch,
-        branch: &branch,
-        workdir: "/work/job",
+        workdir: "/home/user/job",
         checks: &spec.checks,
         codex_args: &exec,
-        pr_title: &pr_title,
     };
     let script = jobscript::build_bootstrap(&bspec);
     let b64 = base64::engine::general_purpose::STANDARD;
-    let mut env = vec![
+    // Only the plan token + prompt enter the sandbox. GitHub credentials
+    // stay on the host; the PR is published from the exported patch.
+    let env = vec![
         (
             codex::ENV_ACCESS_TOKEN.to_string(),
             access_token,
@@ -360,18 +488,11 @@ async fn submit_next(app: &AppHandle, config: &SchedulerConfig) {
             jobscript::ENV_JOB_PROMPT_B64.to_string(),
             b64.encode(spec.prompt.as_bytes()),
         ),
-        (
-            jobscript::ENV_PR_BODY_B64.to_string(),
-            b64.encode(pr_body.as_bytes()),
-        ),
     ];
-    if let Some(tok) = &config.github_token {
-        env.push((jobscript::ENV_CONTRIB_TOKEN.to_string(), tok.clone()));
-    }
     let max_minutes = spec.max_minutes.min(config.rules.max_minutes_per_job);
     let args = SubmitJobArgs {
         project_id: spec.id.clone(),
-        job_id,
+        job_id: job_id.clone(),
         template: spec.template.clone(),
         prompt_pack: spec.prompt_pack.clone(),
         command: vec!["sh".to_string(), "-c".to_string(), script],
@@ -383,6 +504,16 @@ async fn submit_next(app: &AppHandle, config: &SchedulerConfig) {
         Ok(handle) => {
             let mut data = sched.0.lock().await;
             data.active_handle = Some(handle.id);
+            data.active_meta = Some(ActiveJobMeta {
+                project_id: spec.id.clone(),
+                job_id,
+                repo: spec.repo.clone(),
+                base_branch: spec.base_branch.clone(),
+                branch,
+                pr_title,
+                pr_body,
+                github_token: config.github_token.clone(),
+            });
             data.last_project_id = Some(spec.id.clone());
             data.last_verdict = "submitted".to_string();
         }

@@ -50,8 +50,10 @@ record, never in logs — captured output is redacted):
   present where Codex runs. On Embed-local the sandbox is the donor's own
   hardware; on Cloud/remote the token leaves the machine — donors opt
   into that backend explicitly, and short expiry bounds the exposure.
-- `DONATION_GITHUB_TOKEN` (when configured): contribution credential.
-- `JOB_PROMPT_B64` / `PR_BODY_B64`: job inputs.
+- `JOB_PROMPT_B64`: the job prompt.
+- Nothing else. GitHub credentials never enter the sandbox: the job
+  exports its work as a patch on stdout (framed markers), and the host
+  clones, applies, pushes, and opens the PR with `gh`.
 
 Codex runs as `codex exec` with the plan provider overrides, its own
 `workspace-write` sandbox on (defense-in-depth inside E2B), and no
@@ -64,10 +66,11 @@ never expose long-lived donor credentials to the sandbox.
 
 - Donors link GitHub in the app (username + interim PAT now; OAuth
   device flow and other forges later).
-- Interim: the donor's PAT is injected per job. Follow-up: the harness
-  mints **short-lived, per-job contribution credentials** (GitHub App
-  installation tokens scoped to the target repo, or fine-grained PATs
-  via device flow) that expire with the job.
+- Interim: the donor's PAT is used per publish, host-side only (process
+  env for `git push` / `gh pr create`, never argv). Follow-up: the
+  harness mints **short-lived, per-job contribution credentials**
+  (GitHub App installation tokens scoped to the target repo, or
+  fine-grained PATs via device flow) that expire with the job.
 - Every PR footer carries: donor identity, project job-spec version, and
   the SIWC `client_id` as harness provenance.
 - Projects verify PRs against the contributions tracker + registry history.

@@ -1,23 +1,31 @@
 //! Job payload builders: sandbox bootstrap script, PR body, attribution.
 //!
-//! Pure and unit-tested. Secrets (plan token, contribution token) travel
-//! as process env vars, never embedded in the script or logs.
+//! Pure and unit-tested. The plan token travels as a process env var,
+//! never embedded in the script or logs. The sandbox never sees GitHub
+//! credentials: it exports its work as a patch on stdout, and the host
+//! publishes the PR (see the desktop shell's `publish` module).
 
 use crate::codex;
 
-/// Environment variable names consumed inside the sandbox.
+/// Env var carrying the base64-encoded job prompt inside the sandbox.
 pub const ENV_JOB_PROMPT_B64: &str = "JOB_PROMPT_B64";
-pub const ENV_PR_BODY_B64: &str = "PR_BODY_B64";
-pub const ENV_CONTRIB_TOKEN: &str = "DONATION_GITHUB_TOKEN";
+
+/// Max patch bytes exported on stdout; larger diffs are reported as
+/// `PATCH_TOO_LARGE` and left unpublished.
+pub const PATCH_MAX_BYTES: usize = 262144;
+
+/// Stdout markers framing the exported patch and the agent's summary.
+pub const MARK_PATCH_BEGIN: &str = "---DON-A-TOKEN-PATCH-BEGIN---";
+pub const MARK_PATCH_END: &str = "---DON-A-TOKEN-PATCH-END---";
+pub const MARK_RESULT_BEGIN: &str = "---DON-A-TOKEN-RESULT-BEGIN---";
+pub const MARK_RESULT_END: &str = "---DON-A-TOKEN-RESULT-END---";
 
 pub struct BootstrapSpec<'a> {
     pub repo_url: &'a str,
     pub base_branch: &'a str,
-    pub branch: &'a str,
     pub workdir: &'a str,
     pub checks: &'a [String],
     pub codex_args: &'a [String],
-    pub pr_title: &'a str,
 }
 
 /// Shell-quote one argv (single-quote style, safe for curated inputs).
@@ -38,14 +46,14 @@ pub fn repo_slug(url: &str) -> Option<String> {
 }
 
 /// Assemble the one-shot bootstrap script run as `sh -c <script>`.
-/// Prompt and PR body arrive base64-encoded via env; tokens arrive as
-/// env vars. Nothing secret is embedded in the returned script.
+/// The prompt arrives base64-encoded via env; the plan token arrives as
+/// env. Nothing secret is embedded in the returned script. After checks
+/// pass, the worktree is exported as a patch framed by stdout markers;
+/// the host publishes the PR.
 pub fn build_bootstrap(spec: &BootstrapSpec) -> String {
     let repo = sh_quote(spec.repo_url);
     let base = sh_quote(spec.base_branch);
-    let branch = sh_quote(spec.branch);
     let work = sh_quote(spec.workdir);
-    let title = sh_quote(spec.pr_title);
     let codex = spec.codex_args.iter().map(|a| sh_quote(a)).collect::<Vec<_>>().join(" ");
     let mut checks = String::new();
     for check in spec.checks {
@@ -60,29 +68,29 @@ WORK={work}
 REPO="$WORK/repo"
 mkdir -p "$WORK"
 echo "${ENV_JOB_PROMPT_B64}" | base64 -d > "$WORK/prompt.md"
-echo "${ENV_PR_BODY_B64}" | base64 -d > "$WORK/pr-body.md"
 git clone --depth 1 --branch {base} {repo} "$REPO"
 cd "$REPO"
-git checkout -b {branch}
 ACCESS_TOKEN="$ACCESS_TOKEN" codex {codex} "$(cat "$WORK/prompt.md")"
-{checks}git -c user.name='don-a-token' -c user.email='donations@don-a-token.local' add -A
-if git diff --cached --quiet; then echo NO_CHANGES=1; exit 0; fi
-git commit -m {title}
-[ -f "$WORK/RESULT.md" ] && cat "$WORK/RESULT.md" >> "$WORK/pr-body.md" || true
-if [ -z "${{{ENV_CONTRIB_TOKEN}:-}}" ]; then echo NO_PR_TOKEN=1; exit 0; fi
-git -c http.extraHeader="AUTHORIZATION: bearer ${ENV_CONTRIB_TOKEN}" push origin {branch}
-GH_TOKEN="${ENV_CONTRIB_TOKEN}" gh pr create --repo $REPO_SLUG --head {branch} --base {base} --title {title} --body-file "$WORK/pr-body.md"
+{checks}git add -N . >/dev/null 2>&1 || true
+git diff HEAD > "$WORK/changes.patch"
+if [ ! -s "$WORK/changes.patch" ]; then echo NO_CHANGES=1; exit 0; fi
+if [ "$(wc -c < "$WORK/changes.patch")" -gt {patch_max} ]; then echo PATCH_TOO_LARGE=1; exit 0; fi
+echo '{mark_patch_begin}'
+cat "$WORK/changes.patch"
+echo '{mark_patch_end}'
+if [ -f "$WORK/RESULT.md" ]; then echo '{mark_result_begin}'; cat "$WORK/RESULT.md"; echo '{mark_result_end}'; fi
 "#,
         work = work,
         base = base,
         repo = repo,
-        branch = branch,
         codex = codex,
         checks = checks,
-        title = title,
+        patch_max = PATCH_MAX_BYTES,
+        mark_patch_begin = MARK_PATCH_BEGIN,
+        mark_patch_end = MARK_PATCH_END,
+        mark_result_begin = MARK_RESULT_BEGIN,
+        mark_result_end = MARK_RESULT_END,
     )
-    // REPO_SLUG is derived at build time (not in-sandbox) for clarity.
-    .replace("$REPO_SLUG", &sh_quote(&repo_slug(spec.repo_url).unwrap_or_default()))
 }
 
 /// Attribution footer appended to every donated PR body.
@@ -100,8 +108,8 @@ pub fn attribution_footer(
     )
 }
 
-/// Full PR body: static intro + footer. The agent's `RESULT.md` is
-/// appended in-sandbox before `gh pr create`.
+/// Full PR body: static intro + footer. The host appends the agent's
+/// `RESULT.md` (exported on sandbox stdout) before opening the PR.
 pub fn pr_body(project_name: &str, footer: &str) -> String {
     format!(
         "Automated contribution to {project_name}, produced by an unattended\
@@ -137,27 +145,30 @@ mod tests {
     use super::*;
 
     #[test]
-    fn bootstrap_wires_clone_codex_checks_push_pr() {
+    fn bootstrap_wires_clone_codex_checks_patch_export() {
         let checks = ["cargo test".to_string()];
         let codex_args = ["exec".to_string(), "-C".to_string(), ".".to_string()];
         let spec = BootstrapSpec {
             repo_url: "https://github.com/phase-rs/phase",
             base_branch: "main",
-            branch: "don-a-token/job-1",
-            workdir: "/work/job",
+            workdir: "/home/user/job",
             checks: &checks,
             codex_args: &codex_args,
-            pr_title: "don-a-token test",
         };
         let script = build_bootstrap(&spec);
         assert!(script.contains("git clone --depth 1 --branch 'main' 'https://github.com/phase-rs/phase'"));
-        assert!(script.contains("git checkout -b 'don-a-token/job-1'"));
         assert!(script.contains("codex 'exec'"));
         assert!(script.contains("sh -c 'cargo test'"));
-        assert!(script.contains("gh pr create --repo 'phase-rs/phase'"));
-        assert!(script.contains("extraHeader")); // no token in push URL
-        assert!(!script.contains("DONATION_GITHUB_TOKEN=")); // env-only
-        assert!(script.contains("NO_PR_TOKEN=1")); // graceful without token
+        assert!(script.contains("git add -N .")); // new files join the diff
+        assert!(script.contains(MARK_PATCH_BEGIN));
+        assert!(script.contains(MARK_PATCH_END));
+        assert!(script.contains(MARK_RESULT_BEGIN));
+        assert!(script.contains(&PATCH_MAX_BYTES.to_string()));
+        assert!(script.contains("NO_CHANGES=1"));
+        assert!(script.contains("PATCH_TOO_LARGE=1"));
+        assert!(!script.contains("gh pr create")); // host publishes
+        assert!(!script.contains("push origin")); // ...so no push here
+        assert!(!script.contains("DONATION_GITHUB_TOKEN")); // no GH creds in sandbox
     }
 
     #[test]
