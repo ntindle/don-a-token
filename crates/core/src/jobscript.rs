@@ -79,7 +79,7 @@ BASE="$(git rev-parse HEAD)"
 ACCESS_TOKEN="$ACCESS_TOKEN" codex {codex} "$(cat "$WORK/prompt.md")"
 {checks}git add -N . >/dev/null 2>&1 || true
 # Diff against the pre-agent base: the agent commits its work, so a
-# bare `git diff HEAD` would come back empty and drop good patches.
+# bare diff against moving HEAD would come back empty and drop patches.
 git diff "$BASE" > "$WORK/changes.patch"
 if [ ! -s "$WORK/changes.patch" ]; then echo NO_CHANGES=1; exit 0; fi
 if [ "$(wc -c < "$WORK/changes.patch")" -gt {patch_max} ]; then echo PATCH_TOO_LARGE=1; exit 0; fi
