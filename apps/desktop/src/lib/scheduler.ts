@@ -24,6 +24,7 @@ interface SchedulerConfig {
   runner: RunnerConfig;
   donor: string | null;
   githubToken: string | null;
+  workdirRetention: string;
 }
 
 export function buildSchedulerConfig(settings: Settings): SchedulerConfig {
@@ -101,6 +102,7 @@ export function buildSchedulerConfig(settings: Settings): SchedulerConfig {
         },
         donor: settings.githubUsername,
         githubToken: settings.githubToken,
+        workdirRetention: settings.workdirRetention,
       };
   }
   return {
@@ -109,6 +111,7 @@ export function buildSchedulerConfig(settings: Settings): SchedulerConfig {
     runner,
     donor: settings.githubUsername,
     githubToken: settings.githubToken,
+    workdirRetention: settings.workdirRetention,
   };
 }
 

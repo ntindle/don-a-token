@@ -153,6 +153,27 @@ export default function Setup({ settings, onChange, onBack, onFinish }: Props) {
           Embed mints its install key on first start (see the compose
           output). Keys move to the OS keychain in a follow-up.
         </p>
+        <label className="row">
+          <span>Job workdir cleanup</span>
+          <select
+            value={settings.workdirRetention}
+            onChange={(e) =>
+              onChange({
+                ...settings,
+                workdirRetention: e.target.value as AppSettings["workdirRetention"],
+              })
+            }
+          >
+            <option value="none">Always remove (saves disk)</option>
+            <option value="on-failure">Keep failed jobs for debugging</option>
+            <option value="always">Keep everything (fills disk fast)</option>
+          </select>
+        </label>
+        <p className="fineprint">
+          Local backend only: each job leaves a repo clone plus build
+          artifacts (several GB). E2B sandboxes are always destroyed
+          after the run.
+        </p>
       </div>
 
       <div className="card">

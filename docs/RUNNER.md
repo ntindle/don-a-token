@@ -35,7 +35,9 @@ end-to-end loop (run → patch → PR) before trusting a sandbox with it.
 Never the default; the Setup UI labels it testing-only. Timeouts kill
 the whole process tree so no orphaned agent burns plan after the cap.
 The temp workdir (clone + `target/`) is removed when the job reaches a
-terminal state — retained workdirs once filled a donor disk.
+terminal state — retained workdirs once filled a donor disk. Retention
+is a donor setting (Setup → job workdir cleanup): always remove
+(default), keep failed jobs for debugging, or keep everything.
 
 Host toolchain notes (Windows): the scheduler pins
 `RUSTUP_TOOLCHAIN` from the registry's `job.local_toolchain` so the

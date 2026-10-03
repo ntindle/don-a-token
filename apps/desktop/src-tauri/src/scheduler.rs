@@ -49,6 +49,9 @@ pub struct SchedulerConfig {
     /// Contribution credential (device-flow token or donor PAT).
     /// Host-side only; see docs/RUNNER.md.
     pub github_token: Option<String>,
+    /// Local workdir retention: "none" (default), "on-failure", "always".
+    #[serde(default)]
+    pub workdir_retention: Option<String>,
 }
 
 /// Host-side publish context for the active job. The sandbox only
@@ -335,21 +338,33 @@ async fn finish_active(app: &AppHandle, handle_id: &str, status: &str, exit_code
     };
     append_log(app, handle_id, &project_id, &final_status, exit_code, detail.as_deref());
     // Local backend: drop the temp workdir (clone + target/) now that
-    // the outcome is recorded; kept workdirs filled a donor disk.
+    // the outcome is recorded, per the donor's retention setting.
     if let Some(job_id) = cleanup_job_id {
-        let backend_is_local = app
+        let (backend_is_local, retention) = app
             .state::<SchedulerState>()
             .0
             .lock()
             .await
             .config
             .as_ref()
-            .map(|c| c.runner.backend == don_a_token_core::runner::Backend::Local.name())
-            .unwrap_or(false);
+            .map(|c| {
+                (
+                    c.runner.backend == Backend::Local.name(),
+                    c.workdir_retention.clone(),
+                )
+            })
+            .unwrap_or((false, None));
         if backend_is_local {
-            let dir = runner::local_workdir_native(&job_id);
-            if let Err(e) = std::fs::remove_dir_all(&dir) {
-                eprintln!("[sched] cleanup {}: {e}", dir.display());
+            if should_remove_workdir(retention.as_deref(), failed) {
+                let dir = runner::local_workdir_native(&job_id);
+                if let Err(e) = std::fs::remove_dir_all(&dir) {
+                    eprintln!("[sched] cleanup {}: {e}", dir.display());
+                }
+            } else {
+                eprintln!(
+                    "[sched] keeping workdir for {handle_id} (retention={})",
+                    retention.as_deref().unwrap_or("on-failure")
+                );
             }
         }
     }
@@ -368,6 +383,19 @@ async fn finish_active(app: &AppHandle, handle_id: &str, status: &str, exit_code
     eprintln!("[sched] job {handle_id} finished: {final_status} (failed={failed})");
     eprintln!("[sched] stdout tail:\n{}", tail_str(&stdout));
     eprintln!("[sched] stderr tail:\n{}", tail_str(&stderr));
+}
+
+/// Local workdir retention policy. "always" keeps every workdir,
+/// "on-failure" keeps only failed jobs' (for debugging); anything else
+/// — including unknown values and missing config — removes, failing
+/// closed toward cleanup. E2B sandboxes are always destroyed; this only
+/// governs local-backend temp dirs.
+fn should_remove_workdir(retention: Option<&str>, failed: bool) -> bool {
+    match retention {
+        Some("always") => false,
+        Some("on-failure") => !failed,
+        _ => true,
+    }
 }
 
 /// Last 2KB of captured output for the debug log. Stored output is
@@ -639,6 +667,19 @@ mod tests {
     }
 
     #[test]
+    fn retention_fails_closed_toward_cleanup() {
+        assert!(should_remove_workdir(None, false));
+        assert!(should_remove_workdir(None, true));
+        assert!(should_remove_workdir(Some("none"), false));
+        assert!(should_remove_workdir(Some("none"), true));
+        assert!(should_remove_workdir(Some("bogus"), true));
+        assert!(!should_remove_workdir(Some("on-failure"), true));
+        assert!(should_remove_workdir(Some("on-failure"), false));
+        assert!(!should_remove_workdir(Some("always"), false));
+        assert!(!should_remove_workdir(Some("always"), true));
+    }
+
+    #[test]
     fn log_line_is_json() {
         let line = log_line("2026-10-02T00:00:00Z", "phase", "phase-1", "Succeeded", Some(0));
         let v: serde_json::Value = serde_json::from_str(&line).unwrap();
@@ -670,11 +711,13 @@ mod tests {
             }],
             "runner": { "backend": "e2b-cloud", "api_base": "http://127.0.0.1:3000", "api_key": null, "sandbox_base": null },
             "donor": "octocat",
-            "githubToken": null
+            "githubToken": null,
+            "workdirRetention": "on-failure"
         });
         let cfg: SchedulerConfig = serde_json::from_value(json).unwrap();
         assert_eq!(cfg.projects[0].id, "phase");
         assert_eq!(cfg.projects[0].prompt, "do good work");
         assert_eq!(cfg.donor.as_deref(), Some("octocat"));
+        assert_eq!(cfg.workdir_retention.as_deref(), Some("on-failure"));
     }
 }

@@ -24,6 +24,9 @@ export type RunnerBackend =
   | "docker-local"
   | "local";
 
+/** Local-backend job workdir retention. E2B sandboxes are always destroyed. */
+export type WorkdirRetention = "none" | "on-failure" | "always";
+
 export interface Settings {
   rules: DonationRules;
   selectedProjectIds: string[];
@@ -34,6 +37,7 @@ export interface Settings {
   e2bApiKey: string | null;
   /** Contribution credential for opening PRs (device flow or pasted PAT). Keychain is the follow-up. */
   githubToken: string | null;
+  workdirRetention: WorkdirRetention;
   seenPlanModal: boolean;
   onboardingStep: OnboardingStep;
 }
@@ -54,6 +58,7 @@ export const DEFAULT_SETTINGS: Settings = {
   embedEndpoint: "http://127.0.0.1:3000",
   e2bApiKey: null,
   githubToken: null,
+  workdirRetention: "none",
   seenPlanModal: false,
   onboardingStep: "welcome",
 };
