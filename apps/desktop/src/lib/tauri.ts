@@ -146,3 +146,18 @@ export async function schedulerStatus(): Promise<SchedulerStatus> {
   if (!isTauri()) throw new Error("browser-dev");
   return invoke<SchedulerStatus>("scheduler_status");
 }
+
+export interface HistoryEntry {
+  ts: string;
+  project_id: string;
+  handle_id: string;
+  status: string;
+  exit_code: number | null;
+  detail: string | null;
+}
+
+/** Newest-first slice of the local contribution log. */
+export async function schedulerHistory(limit = 10): Promise<HistoryEntry[]> {
+  if (!isTauri()) return [];
+  return invoke<HistoryEntry[]>("scheduler_history", { limit });
+}

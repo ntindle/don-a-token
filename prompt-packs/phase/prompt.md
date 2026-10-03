@@ -8,7 +8,10 @@ donated work.
 ## Steps
 
 1. **Explore.** Read the repo layout, `README.md`, and `CONTRIBUTING.md`
-   (if present). Run the test suite once to establish a baseline.
+   (if present). Establish a baseline with the cheap checks only
+   (`cargo fmt`, the project's clippy command, and the test target
+   for the crate you will touch) — never a full-workspace `cargo
+   test`, which is too slow and too large for a donation job.
 2. **Pick one small task.** In priority order:
    - A well-scoped open issue labeled good-first-issue / help-wanted.
    - Missing unit-test coverage for recently changed code.
@@ -20,8 +23,10 @@ donated work.
    without committing.
 3. **Implement.** Keep the diff minimal and focused on the one task.
    Do not refactor unrelated code. Do not add dependencies.
-4. **Verify.** The project's check commands must pass (run them yourself).
-   Add or update tests for behavior you changed.
+4. **Verify.** Run the scoped checks yourself (fmt, clippy, and the
+   test target for each crate you changed) — they must pass. Add or
+   update tests for behavior you changed. Do not run the full
+   workspace test suite.
 5. **Commit** on the current branch with a clear message. Do NOT push —
    the harness handles push and PR creation.
 

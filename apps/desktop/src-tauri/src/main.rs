@@ -87,7 +87,8 @@ fn main() {
             runner::job_status,
             runner::job_cancel,
             scheduler::scheduler_sync,
-            scheduler::scheduler_status
+            scheduler::scheduler_status,
+            scheduler::scheduler_history
         ])
         .setup(|app| {
             build_tray(app.handle())?;

@@ -4,8 +4,11 @@ import type { Settings } from "../lib/settings";
 import {
   isTauri,
   jobCancel,
+  openExternal,
+  schedulerHistory,
   schedulerStatus,
   type AccountSummary,
+  type HistoryEntry,
   type SchedulerStatus,
 } from "../lib/tauri";
 import registry from "../../../../projects/registry.json";
@@ -62,8 +65,25 @@ function describeVerdict(v: string): string {
   return v;
 }
 
+function describeOutcome(s: string): string {
+  if (s === "succeeded") return "Succeeded";
+  if (s === "no-changes") return "Finished with no changes";
+  if (s === "published") return "Published a pull request";
+  if (s === "patch-too-large") return "Patch too large to publish";
+  if (s === "needs-publish") return "Waiting on a contribution token";
+  if (s === "publish-failed") return "Couldn't open its pull request";
+  if (s === "no-patch") return "Produced no patch";
+  if (s === "TimedOut") return "Timed out";
+  if (s.startsWith("Failed")) {
+    const m = /reason: "([^"]+)"/.exec(s);
+    return m ? `Failed — ${m[1]}` : "Failed";
+  }
+  return s;
+}
+
 export default function Status({ settings, accounts, onChange, onNavigate }: Props) {
   const [status, setStatus] = useState<SchedulerStatus | null>(null);
+  const [history, setHistory] = useState<HistoryEntry[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [cancelling, setCancelling] = useState(false);
 
@@ -74,6 +94,11 @@ export default function Status({ settings, accounts, onChange, onNavigate }: Pro
       setError(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
+    }
+    try {
+      setHistory(await schedulerHistory(10));
+    } catch {
+      // Old shell without the command: leave history empty, don't alarm.
     }
   }, []);
 
@@ -222,6 +247,42 @@ export default function Status({ settings, accounts, onChange, onNavigate }: Pro
             Edit projects
           </button>
         </p>
+      </div>
+
+      <div className="card">
+        <h2>Recent donations</h2>
+        {history === null ? (
+          <p className="fineprint">Loading…</p>
+        ) : history.length === 0 ? (
+          <p className="fineprint">No donations recorded yet.</p>
+        ) : (
+          <ul className="provider-list">
+            {history.map((h) => (
+              <li key={`${h.handle_id}-${h.ts}`}>
+                <span className="provider-name">
+                  {new Date(h.ts).toLocaleString()} · {h.project_id}
+                </span>
+                <span className="provider-note">
+                  {describeOutcome(h.status)}
+                  {h.detail && h.detail.startsWith("http") && (
+                    <>
+                      {" · "}
+                      <a
+                        href={h.detail}
+                        onClick={(e) => {
+                          e.preventDefault();
+                          void openExternal(h.detail!);
+                        }}
+                      >
+                        PR
+                      </a>
+                    </>
+                  )}
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
       </div>
 
       <div className="card">

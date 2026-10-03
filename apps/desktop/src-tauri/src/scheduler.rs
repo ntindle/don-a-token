@@ -233,6 +233,26 @@ pub async fn scheduler_status(state: State<'_, SchedulerState>) -> Result<Schedu
     })
 }
 
+/// Newest-first slice of the local contribution log. Malformed lines
+/// are skipped so one bad write can't hide the whole history.
+fn tail_history(text: &str, n: usize) -> Vec<serde_json::Value> {
+    text.lines()
+        .rev()
+        .take(n)
+        .filter_map(|l| serde_json::from_str::<serde_json::Value>(l).ok())
+        .collect()
+}
+
+#[tauri::command]
+pub async fn scheduler_history(
+    app: AppHandle,
+    limit: Option<usize>,
+) -> Result<Vec<serde_json::Value>, String> {
+    let dir = app_dir(&app)?;
+    let text = std::fs::read_to_string(dir.join("donations.jsonl")).unwrap_or_default();
+    Ok(tail_history(&text, limit.unwrap_or(10).clamp(1, 200)))
+}
+
 pub fn spawn_loop(app: AppHandle) {
     tauri::async_runtime::spawn(async move {
         let mut interval = tokio::time::interval(std::time::Duration::from_secs(TICK_SECS));
@@ -687,6 +707,17 @@ mod tests {
         assert!(should_remove_workdir(Some("on-failure"), false));
         assert!(!should_remove_workdir(Some("always"), false));
         assert!(!should_remove_workdir(Some("always"), true));
+    }
+
+    #[test]
+    fn history_is_newest_first_and_skips_bad_lines() {
+        let text = "{\"a\":1}\nnot json\n{\"a\":2}\n{\"a\":3}";
+        let out = tail_history(text, 10);
+        assert_eq!(out.len(), 3);
+        assert_eq!(out[0]["a"], 3);
+        assert_eq!(out[2]["a"], 1);
+        assert_eq!(tail_history(text, 2).len(), 2);
+        assert!(tail_history("", 10).is_empty());
     }
 
     #[test]
