@@ -657,7 +657,59 @@ async fn submit_local(
     tauri::async_runtime::spawn(async move {
         drive_local(app_clone, handle_id, command).await;
     });
+    // Backstop for the driver's own timeout: if the driver task dies
+    // or wedges without recording a terminal state, the record would
+    // sit Running forever and the scheduler would never advance. The
+    // supervisor fires after the driver's deadline plus a margin and
+    // force-finishes stragglers. Normally it no-ops.
+    let sup_app = app.clone();
+    let sup_id = handle.id.clone();
+    let sup_wait = supervisor_delay_secs(job.max_minutes);
+    tauri::async_runtime::spawn(async move {
+        tokio::time::sleep(Duration::from_secs(sup_wait)).await;
+        supervise_local_straggler(&sup_app, &sup_id).await;
+    });
     Ok(JobHandleView { id: handle.id })
+}
+
+/// Extra margin past the driver's own timeout (max_minutes + 60s)
+/// before the supervisor treats a local job as a straggler.
+const SUPERVISOR_MARGIN_SECS: u64 = 120;
+
+fn supervisor_delay_secs(max_minutes: u32) -> u64 {
+    u64::from(max_minutes) * 60 + 60 + SUPERVISOR_MARGIN_SECS
+}
+
+/// Backstop timeout for local jobs. Runs in its own task so it
+/// survives the driver's death; normally the driver finishes first
+/// and this no-ops on the terminal record.
+async fn supervise_local_straggler(app: &AppHandle, handle_id: &str) {
+    let pid = {
+        let jobs = app.state::<JobState>();
+        let guard = jobs.0.lock().await;
+        match guard.get(handle_id) {
+            Some(rec) if matches!(rec.status, JobStatus::Running | JobStatus::Queued) => {
+                rec.local_pid
+            }
+            _ => return,
+        }
+    };
+    eprintln!("[runner] {handle_id}: supervisor: still running past the driver deadline; killing");
+    if let Some(pid) = pid {
+        kill_tree(pid).await;
+    }
+    finish_job(
+        app,
+        handle_id,
+        JobStatus::TimedOut,
+        Some(CommandOutput {
+            stdout: Vec::new(),
+            stderr: Vec::new(),
+            exit_code: None,
+            error: Some("supervisor: job exceeded its deadline (driver timeout missed)".to_string()),
+        }),
+    )
+    .await;
 }
 
 /// Run the job command directly on the host, capturing output. On
@@ -874,6 +926,17 @@ mod tests {
     use std::sync::{Arc, Mutex as StdMutex};
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpListener;
+
+    #[test]
+    fn supervisor_fires_after_driver_deadline() {
+        // The driver's own deadline is max*60+60; the supervisor adds
+        // its margin on top so it only fires when the driver missed.
+        assert_eq!(
+            supervisor_delay_secs(60),
+            60 * 60 + 60 + SUPERVISOR_MARGIN_SECS
+        );
+        assert_eq!(supervisor_delay_secs(0), 60 + SUPERVISOR_MARGIN_SECS);
+    }
 
     fn envelope(flags: u8, payload: &[u8]) -> Vec<u8> {
         let mut out = vec![flags];
