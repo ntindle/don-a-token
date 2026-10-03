@@ -9,6 +9,27 @@
       "description": "First donation target: Rust-based Phase tooling. Jobs triage issues, write tests, and open small, reviewable pull requests.",
       "homepage": "https://github.com/phase-rs/phase",
       "status": "active",
+      "required_providers": [{ "kind": "github" }],
+      "work_categories": [
+        {
+          "id": "validate-bugs",
+          "label": "Bug validation",
+          "tier": "terra",
+          "description": "Triage and reproduce reported issues; confirm or close."
+        },
+        {
+          "id": "fix-bugs",
+          "label": "Bug fixes",
+          "tier": "frontier",
+          "description": "Small, reviewable fixes for confirmed issues."
+        },
+        {
+          "id": "new-features",
+          "label": "New features",
+          "tier": "frontier",
+          "description": "Novel work; requires frontier models."
+        }
+      ],
       "job": {
         "kind": "codex-task",
         "template": "don-a-token-rust-v4",

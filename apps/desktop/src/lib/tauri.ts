@@ -48,6 +48,36 @@ export async function openExternal(url: string): Promise<void> {
   await openUrl(url);
 }
 
+export interface DeviceStart {
+  device_code: string;
+  user_code: string;
+  verification_uri: string;
+  verification_uri_complete: string | null;
+  expires_in: number;
+  interval_secs: number;
+}
+
+export type DevicePoll =
+  | { status: "pending" }
+  | { status: "slow_down" }
+  | { status: "done"; access_token: string }
+  | { status: "expired" }
+  | { status: "denied" };
+
+/** Start a GitHub device flow; returns the user code to display. */
+export async function githubDeviceStart(): Promise<DeviceStart> {
+  if (!isTauri()) throw new Error("browser-dev");
+  return invoke<DeviceStart>("github_device_start");
+}
+
+/** One device-flow poll; the caller paces calls by the start interval. */
+export async function githubDevicePoll(
+  deviceCode: string,
+): Promise<DevicePoll> {
+  if (!isTauri()) throw new Error("browser-dev");
+  return invoke<DevicePoll>("github_device_poll", { deviceCode });
+}
+
 export const MANAGE_USAGE_URL = "https://chatgpt.com/settings/usage";
 
 export interface RunnerConfig {

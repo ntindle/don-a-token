@@ -41,8 +41,8 @@ pub struct SchedulerConfig {
     pub projects: Vec<SchedProject>,
     pub runner: RunnerConfigArgs,
     pub donor: Option<String>,
-    /// Interim contribution credential (donor PAT). GitHub App installation
-    /// tokens are the follow-up; see docs/RUNNER.md.
+    /// Contribution credential (device-flow token or donor PAT).
+    /// Host-side only; see docs/RUNNER.md.
     pub github_token: Option<String>,
 }
 
@@ -584,8 +584,6 @@ mod tests {
         let json = serde_json::json!({
             "rules": {
                 "enabled": true,
-                "maxPctOfRemaining": 10,
-                "reserveFloorPct": 5,
                 "maxMinutesPerJob": 30,
                 "cooldownMinutesBetweenJobs": 15,
                 "quietHours": null,
@@ -610,7 +608,6 @@ mod tests {
         let cfg: SchedulerConfig = serde_json::from_value(json).unwrap();
         assert_eq!(cfg.projects[0].id, "phase");
         assert_eq!(cfg.projects[0].prompt, "do good work");
-        assert_eq!(cfg.rules.max_pct_of_remaining, 10);
         assert_eq!(cfg.donor.as_deref(), Some("octocat"));
     }
 }

@@ -1,14 +1,10 @@
 //! User donation rules: when the harness may spend plan capacity.
 //!
-//! The headline knobs from onboarding:
-//! - `max_pct_of_remaining` — donate at most X% of remaining usage (default 10).
-//! - `reserve_floor_pct` — always leave at least Y% untouched (default 5).
-//!
-//! Percent-of-limit enforcement needs usage telemetry that has no
-//! programmatic API today (users see it at ChatGPT usage settings), so the
-//! scheduler treats the percent knobs as job-pacing budgets calibrated from
-//! observed per-job token burn, and they hard-stop on usage-limit errors.
-//! Pause / skip-week / quiet-hours are enforced exactly, here.
+//! Percent-of-plan caps live in ChatGPT usage settings as a per-app limit
+//! (the app's "Manage usage" links): the API exposes no usage telemetry,
+//! so this app cannot enforce a percent itself. Everything here — enabled,
+//! per-job caps, cooldown, quiet hours, pause, skip-week — is enforced
+//! exactly.
 
 use chrono::{DateTime, Datelike, Timelike, Utc};
 use serde::{Deserialize, Serialize};
@@ -27,8 +23,6 @@ pub struct QuietHours {
 #[serde(rename_all = "camelCase")]
 pub struct DonationRules {
     pub enabled: bool,
-    pub max_pct_of_remaining: u8,
-    pub reserve_floor_pct: u8,
     pub max_minutes_per_job: u32,
     pub cooldown_minutes_between_jobs: u32,
     pub quiet_hours: Option<QuietHours>,
@@ -42,8 +36,6 @@ impl Default for DonationRules {
     fn default() -> Self {
         Self {
             enabled: true,
-            max_pct_of_remaining: 10,
-            reserve_floor_pct: 5,
             max_minutes_per_job: 30,
             cooldown_minutes_between_jobs: 15,
             quiet_hours: None,
@@ -131,8 +123,6 @@ mod tests {
     #[test]
     fn defaults_match_onboarding() {
         let r = DonationRules::default();
-        assert_eq!(r.max_pct_of_remaining, 10);
-        assert_eq!(r.reserve_floor_pct, 5);
         assert!(r.should_run(noon()).run);
     }
 
@@ -167,8 +157,6 @@ mod tests {
     #[test]
     fn rules_json_is_camel_case_for_frontend() {
         let json = serde_json::to_value(DonationRules::default()).unwrap();
-        assert_eq!(json["maxPctOfRemaining"], 10);
-        assert_eq!(json["reserveFloorPct"], 5);
         assert_eq!(json["cooldownMinutesBetweenJobs"], 15);
         let back: DonationRules = serde_json::from_value(json).unwrap();
         assert_eq!(back, DonationRules::default());

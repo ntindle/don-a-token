@@ -22,21 +22,24 @@ website/               static site on Cloudflare Pages
 
 1. **Welcome** — provider list (ChatGPT now, more later), `Continue with
    ChatGPT` (SIWC dynamic registration), first-sign-in plan modal.
-2. **Rules** — percent caps, reserve floor, per-job caps, cooldown,
-   quiet hours, pause, skip-week. Stored in the settings store.
-3. **Projects** — curated registry entries with per-job caps; GitHub
-   identity linking for PR attribution.
+2. **Rules** — per-job caps, cooldown, quiet hours, pause,
+   skip-week. Stored in the settings store. Percent-of-plan caps are set
+   per-app in ChatGPT usage settings (linked from the app).
+3. **Projects** — curated registry entries with required providers,
+   work categories and tiers; per-job caps.
+4. **Setup** — runner backend (Embed/Cloud) and contribution identity
+   (GitHub username + token) for PR attribution.
 
-### Donation loop (scheduler lands after the spikes)
+### Donation loop
 
 ```text
 rules.should_run(now)? --> pick project --> build job --> runner.submit()
-    --> poll status --> on usage-limit error: halt + surface Manage usage
+    --> poll status --> on repeated failure: halt + surface Manage usage
     --> on success: record contribution, cooldown, repeat
 ```
 
-Percent-of-limit pacing is calibrated from observed per-job burn until a
-programmatic usage API exists; usage-limit errors are a hard stop.
+Plan-spending caps are enforced ChatGPT-side via the per-app usage limit
+(the API exposes no usage telemetry); repeated job failures halt the loop.
 
 ### Auth (SIWC token-sharing)
 

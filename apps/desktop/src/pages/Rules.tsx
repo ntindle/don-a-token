@@ -1,5 +1,6 @@
 import PlanBadge from "../components/PlanBadge";
 import { isoWeek, type Settings } from "../lib/settings";
+import { MANAGE_USAGE_URL, openExternal } from "../lib/tauri";
 
 interface Props {
   settings: Settings;
@@ -25,8 +26,8 @@ export default function Rules({ settings, onChange, onBack, onNext }: Props) {
       <header className="page-head">
         <h1>Configure your rules</h1>
         <p className="lede">
-          Don-a-Token only spends capacity inside these bounds — and stops
-          immediately on any usage-limit error.
+          Don-a-Token only runs jobs inside these bounds. Cap plan
+          spending with a per-app percent max in ChatGPT settings.
         </p>
       </header>
 
@@ -38,36 +39,6 @@ export default function Rules({ settings, onChange, onBack, onNext }: Props) {
             checked={r.enabled}
             onChange={(e) => set({ enabled: e.target.checked })}
           />
-        </label>
-
-        <label className="row">
-          <span>Donate at most this much of remaining usage</span>
-          <span className="input-suffix">
-            <input
-              type="number"
-              min={1}
-              max={100}
-              value={r.maxPctOfRemaining}
-              onChange={(e) =>
-                set({ maxPctOfRemaining: num(e.target.value, 10) })
-              }
-            />
-            %
-          </span>
-        </label>
-
-        <label className="row">
-          <span>Always leave me at least this much</span>
-          <span className="input-suffix">
-            <input
-              type="number"
-              min={0}
-              max={100}
-              value={r.reserveFloorPct}
-              onChange={(e) => set({ reserveFloorPct: num(e.target.value, 5) })}
-            />
-            %
-          </span>
         </label>
 
         <label className="row">
@@ -93,6 +64,26 @@ export default function Rules({ settings, onChange, onBack, onNext }: Props) {
             }
           />
         </label>
+      </div>
+
+      <div className="card">
+        <h2>ChatGPT plan cap</h2>
+        <p className="fineprint">
+          Set a per-app percent max in ChatGPT settings — that&apos;s the
+          enforced limit on plan spending. This app can&apos;t see your
+          usage, so it can&apos;t cap a percent itself.
+        </p>
+        <p>
+          <a
+            href={MANAGE_USAGE_URL}
+            onClick={(e) => {
+              e.preventDefault();
+              void openExternal(MANAGE_USAGE_URL);
+            }}
+          >
+            Manage usage
+          </a>
+        </p>
       </div>
 
       <div className="card">

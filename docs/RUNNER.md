@@ -64,13 +64,12 @@ dangerous bypass flags.
 Requirements: PRs open in the donor's name, attributable, revocable, and
 never expose long-lived donor credentials to the sandbox.
 
-- Donors link GitHub in the app (username + interim PAT now; OAuth
-  device flow and other forges later).
-- Interim: the donor's PAT is used per publish, host-side only (process
-  env for `git push` / `gh pr create`, never argv). Follow-up: the
-  harness mints **short-lived, per-job contribution credentials**
-  (GitHub App installation tokens scoped to the target repo, or
-  fine-grained PATs via device flow) that expire with the job.
+- Donors link GitHub in the app (username + OAuth device flow,
+  `gh auth login`-style; pasting a classic PAT is still accepted).
+- The linked token is used per publish, host-side only (process env for
+  `git push` / `gh pr create`, never argv, never the sandbox).
+  Follow-up: short-lived, per-job contribution credentials scoped to
+  the target repo.
 - Every PR footer carries: donor identity, project job-spec version, and
   the SIWC `client_id` as harness provenance.
 - Projects verify PRs against the contributions tracker + registry history.

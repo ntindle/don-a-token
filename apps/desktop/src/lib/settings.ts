@@ -8,8 +8,6 @@ export interface QuietHours {
 
 export interface DonationRules {
   enabled: boolean;
-  maxPctOfRemaining: number;
-  reserveFloorPct: number;
   maxMinutesPerJob: number;
   cooldownMinutesBetweenJobs: number;
   quietHours: QuietHours | null;
@@ -18,7 +16,7 @@ export interface DonationRules {
   skipWeekOf: string | null;
 }
 
-export type OnboardingStep = "welcome" | "rules" | "projects" | "done";
+export type OnboardingStep = "welcome" | "rules" | "projects" | "setup" | "done";
 export type RunnerBackend =
   | "embed-local"
   | "embed-remote"
@@ -33,7 +31,7 @@ export interface Settings {
   embedEndpoint: string;
   /** E2B team API key (Cloud) or Embed install key. TODO: move to OS keychain. */
   e2bApiKey: string | null;
-  /** Interim contribution credential for opening PRs. GitHub App tokens are the follow-up. */
+  /** Contribution credential for opening PRs (device flow or pasted PAT). Keychain is the follow-up. */
   githubToken: string | null;
   seenPlanModal: boolean;
   onboardingStep: OnboardingStep;
@@ -42,8 +40,6 @@ export interface Settings {
 export const DEFAULT_SETTINGS: Settings = {
   rules: {
     enabled: true,
-    maxPctOfRemaining: 10,
-    reserveFloorPct: 5,
     maxMinutesPerJob: 30,
     cooldownMinutesBetweenJobs: 15,
     quietHours: null,

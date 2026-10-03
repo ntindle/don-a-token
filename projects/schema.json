@@ -11,7 +11,7 @@
       "type": "array",
       "items": {
         "type": "object",
-        "required": ["id", "name", "repo", "description", "homepage", "status", "job"],
+        "required": ["id", "name", "repo", "description", "homepage", "status", "required_providers", "work_categories", "job"],
         "properties": {
           "id": { "type": "string", "minLength": 1 },
           "name": { "type": "string", "minLength": 1 },
@@ -19,6 +19,43 @@
           "description": { "type": "string", "minLength": 1 },
           "homepage": { "type": "string" },
           "status": { "enum": ["active", "paused"] },
+          "required_providers": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "required": ["kind"],
+              "properties": {
+                "kind": { "enum": ["none", "github", "gitlab"] },
+                "push_endpoint": {
+                  "type": "string",
+                  "description": "Where to push results when kind is none."
+                }
+              }
+            }
+          },
+          "work_categories": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "required": ["id", "label", "tier"],
+              "properties": {
+                "id": { "type": "string", "minLength": 1 },
+                "label": { "type": "string", "minLength": 1 },
+                "tier": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "Model tier required for this category, e.g. frontier, terra."
+                },
+                "description": { "type": "string" },
+                "prompt_pack": {
+                  "type": "string",
+                  "description": "Category prompt pack; defaults to the job-level one."
+                }
+              }
+            }
+          },
           "job": {
             "type": "object",
             "required": ["kind", "template", "max_tokens_per_job", "max_minutes_per_job", "checks", "prompt_pack", "contribution"],

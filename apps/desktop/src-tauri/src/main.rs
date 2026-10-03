@@ -1,6 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod auth;
+mod github;
 mod publish;
 mod runner;
 mod scheduler;
@@ -80,6 +81,8 @@ fn main() {
             auth::refresh_account,
             auth::list_accounts,
             auth::sign_out,
+            github::github_device_start,
+            github::github_device_poll,
             runner::job_submit,
             runner::job_status,
             runner::job_cancel,

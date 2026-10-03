@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import Welcome from "./pages/Welcome";
 import Rules from "./pages/Rules";
 import Projects from "./pages/Projects";
+import Setup from "./pages/Setup";
 import FirstRunModal from "./components/FirstRunModal";
 import {
   isoWeek,
@@ -21,7 +22,9 @@ import { pushScheduler } from "./lib/scheduler";
 
 function stepFromHash(): OnboardingStep | null {
   const h = window.location.hash.replace(/^#\/?/, "");
-  return h === "welcome" || h === "rules" || h === "projects" ? h : null;
+  return h === "welcome" || h === "rules" || h === "projects" || h === "setup"
+    ? h
+    : null;
 }
 
 export default function App() {
@@ -157,13 +160,30 @@ export default function App() {
           onNext={() => go("projects")}
         />
       )}
-      {(active === "projects" || active === "done") && (
+      {active === "projects" && (
         <Projects
           settings={settings}
           onChange={update}
           onBack={() => go("rules")}
-          finished={active === "done"}
+          finished={false}
+          onNext={() => go("setup")}
+        />
+      )}
+      {active === "setup" && (
+        <Setup
+          settings={settings}
+          onChange={update}
+          onBack={() => go("projects")}
           onFinish={() => void update({ ...settings, onboardingStep: "done" })}
+        />
+      )}
+      {active === "done" && (
+        <Projects
+          settings={settings}
+          onChange={update}
+          onBack={() => go("rules")}
+          finished
+          onNext={() => go("setup")}
         />
       )}
     </main>

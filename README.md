@@ -13,8 +13,8 @@ sandboxed Codex jobs for projects you pick, on rules you set.
 1. **Sign in with ChatGPT** — the desktop app registers a user-defined agent
    via Sign in with ChatGPT (SIWC) with ChatGPT plan usage. Your keystrokes
    never leave your machine; only eligible inference requests use your plan.
-2. **Set your rules** — cap donations (e.g. at most 10% of remaining usage),
-   keep a reserve floor (e.g. always leave 5%), quiet hours, pause, skip a week.
+2. **Set your rules** — cap plan spending with a per-app percent max in
+   ChatGPT settings, plus quiet hours, pause, skip a week.
 3. **Pick your projects** — choose from a manually approved registry of
    donation opportunities. Jobs run unattended inside isolated sandboxes
    (E2B Embed on Linux, E2B Cloud or containers elsewhere) and contribute
