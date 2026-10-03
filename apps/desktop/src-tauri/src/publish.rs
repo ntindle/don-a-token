@@ -6,6 +6,7 @@
 //! and opens a PR with `gh`. Secrets travel as process env only — never
 //! in argv, never in captured error text.
 
+use base64::Engine as _;
 use don_a_token_core::jobscript;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -129,13 +130,18 @@ pub fn gh_pr_create_args(slug: &str, head: &str, base: &str, title: &str, body_f
 
 /// Auth for `git push` without argv leaks: git reads `GIT_CONFIG_*` env
 /// into effective config, so the token never appears in process args.
+/// GitHub's git-over-HTTPS endpoint rejects `Bearer` auth ("invalid
+/// credentials") even though Bearer works for the REST API — the git
+/// endpoint wants Basic with the token as the password — so encode
+/// `x-access-token:{token}` instead.
 pub fn git_push_env(token: &str) -> Vec<(String, String)> {
+    let creds = base64::engine::general_purpose::STANDARD.encode(format!("x-access-token:{token}"));
     vec![
         ("GIT_CONFIG_COUNT".to_string(), "1".to_string()),
         ("GIT_CONFIG_KEY_0".to_string(), "http.extraHeader".to_string()),
         (
             "GIT_CONFIG_VALUE_0".to_string(),
-            format!("AUTHORIZATION: bearer {token}"),
+            format!("AUTHORIZATION: basic {creds}"),
         ),
     ]
 }
@@ -398,7 +404,19 @@ mod tests {
     fn push_env_keeps_token_out_of_argv() {
         let env = git_push_env("sekret");
         assert!(env.iter().any(|(k, v)| k == "GIT_CONFIG_KEY_0" && v == "http.extraHeader"));
-        assert!(env.iter().any(|(_, v)| v.contains("sekret")));
+        // The git endpoint wants Basic with the token as password
+        // (Bearer is rejected with "invalid credentials").
+        let val = env
+            .iter()
+            .find(|(k, _)| k == "GIT_CONFIG_VALUE_0")
+            .unwrap()
+            .1
+            .clone();
+        let b64 = val.strip_prefix("AUTHORIZATION: basic ").unwrap();
+        let decoded = base64::engine::general_purpose::STANDARD
+            .decode(b64)
+            .unwrap();
+        assert_eq!(decoded, b"x-access-token:sekret");
         assert_eq!(gh_env("sekret"), vec![("GH_TOKEN".to_string(), "sekret".to_string())]);
     }
 

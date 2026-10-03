@@ -15,8 +15,10 @@ pub const GITHUB_OAUTH_CLIENT_ID: &str = "Ov23libwvTLILpIhlikH";
 
 const DEVICE_CODE_URL: &str = "https://github.com/login/device/code";
 const ACCESS_TOKEN_URL: &str = "https://github.com/login/oauth/access_token";
-/// Classic scope covering branch push + PR open.
-const SCOPE: &str = "repo";
+/// `repo` covers branch push + PR open; `workflow` is required too
+/// because a push whose history introduces workflow-file blobs (e.g.
+/// a fork that drifted behind upstream) is rejected without it.
+const SCOPE: &str = "repo workflow";
 /// `urn:ietf:params:oauth:grant-type:device_code` per RFC 8628.
 const DEVICE_GRANT: &str = "urn:ietf:params:oauth:grant-type:device_code";
 const HTTP_TIMEOUT: Duration = Duration::from_secs(30);
