@@ -1,13 +1,19 @@
 import { useState } from "react";
 import PlanBadge from "../components/PlanBadge";
-import { MANAGE_USAGE_URL, openExternal, startSignIn } from "../lib/tauri";
+import {
+  MANAGE_USAGE_URL,
+  openExternal,
+  startSignIn,
+  type AccountSummary,
+} from "../lib/tauri";
 
 interface Props {
+  accounts: AccountSummary[];
   onSignedIn: () => void;
   onExplore: () => void;
 }
 
-export default function Welcome({ onSignedIn, onExplore }: Props) {
+export default function Welcome({ accounts, onSignedIn, onExplore }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -24,6 +30,57 @@ export default function Welcome({ onSignedIn, onExplore }: Props) {
     } finally {
       setBusy(false);
     }
+  }
+
+  if (accounts.length > 0) {
+    const first = accounts[0];
+    return (
+      <section className="page">
+        <header className="page-head">
+          <h1>You&apos;re signed in</h1>
+          <p className="lede">
+            Don-a-Token runs small, sandboxed Codex jobs for projects you pick,
+            using ChatGPT plan capacity you weren&apos;t going to use anyway.
+            Folding@home for tokens.
+          </p>
+        </header>
+
+        <div className="card">
+          <p>
+            Signed in as <strong>{first.email}</strong>
+            {first.has_plan_usage ? " with plan usage" : ""}.
+          </p>
+          <button className="btn btn-primary btn-chatgpt" onClick={onSignedIn}>
+            Continue
+          </button>
+          {error && <p className="error">{error}</p>}
+          <p>
+            <button
+              className="btn btn-ghost"
+              onClick={handleContinue}
+              disabled={busy}
+            >
+              {busy ? "Waiting for browser approval…" : "Use a different account"}
+            </button>
+          </p>
+          <p className="fineprint">
+            Eligible requests use your ChatGPT plan. Review usage anytime:{" "}
+            <a
+              href={MANAGE_USAGE_URL}
+              onClick={(e) => {
+                e.preventDefault();
+                void openExternal(MANAGE_USAGE_URL);
+              }}
+            >
+              Manage usage
+            </a>
+            .
+          </p>
+        </div>
+
+        <PlanBadge />
+      </section>
+    );
   }
 
   return (

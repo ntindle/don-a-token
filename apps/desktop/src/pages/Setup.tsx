@@ -14,9 +14,11 @@ interface Props {
   onChange: (s: AppSettings) => void;
   onBack: () => void;
   onFinish: () => void;
+  /** Post-onboarding: single back-to-status nav instead of the chain. */
+  settingsMode?: boolean;
 }
 
-export default function Setup({ settings, onChange, onBack, onFinish }: Props) {
+export default function Setup({ settings, onChange, onBack, onFinish, settingsMode }: Props) {
   const [link, setLink] = useState<DeviceStart | null>(null);
   const [linkBusy, setLinkBusy] = useState(false);
   const [linkError, setLinkError] = useState<string | null>(null);
@@ -298,16 +300,24 @@ export default function Setup({ settings, onChange, onBack, onFinish }: Props) {
       <PlanBadge />
 
       <nav className="nav-row">
-        <button className="btn" onClick={onBack}>
-          Back
-        </button>
-        <button
-          className="btn btn-primary"
-          onClick={onFinish}
-          disabled={settings.selectedProjectIds.length === 0}
-        >
-          Start donating
-        </button>
+        {settingsMode ? (
+          <button className="btn" onClick={onBack}>
+            Back to status
+          </button>
+        ) : (
+          <>
+            <button className="btn" onClick={onBack}>
+              Back
+            </button>
+            <button
+              className="btn btn-primary"
+              onClick={onFinish}
+              disabled={settings.selectedProjectIds.length === 0}
+            >
+              Start donating
+            </button>
+          </>
+        )}
       </nav>
     </section>
   );

@@ -229,6 +229,28 @@ input[type="checkbox"] {
   border-color: var(--accent);
 }
 
+.status-running {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.status-idle {
+  color: var(--muted);
+}
+
+.top-nav {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 20px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--line);
+}
+
+.top-nav .active {
+  color: var(--ink);
+  font-weight: 700;
+}
+
 .modal-backdrop {
   position: fixed;
   inset: 0;

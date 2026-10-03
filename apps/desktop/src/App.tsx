@@ -3,6 +3,7 @@ import Welcome from "./pages/Welcome";
 import Rules from "./pages/Rules";
 import Projects from "./pages/Projects";
 import Setup from "./pages/Setup";
+import Status from "./pages/Status";
 import FirstRunModal from "./components/FirstRunModal";
 import {
   isoWeek,
@@ -15,26 +16,47 @@ import { listen } from "@tauri-apps/api/event";
 import {
   MANAGE_USAGE_URL,
   isTauri,
+  listAccounts,
   onTrayAction,
   openExternal,
+  type AccountSummary,
 } from "./lib/tauri";
 import { pushScheduler } from "./lib/scheduler";
 
-function stepFromHash(): OnboardingStep | null {
+/** Routable views: onboarding steps plus the post-onboarding dashboard. */
+type View = OnboardingStep | "status";
+
+function stepFromHash(): View | null {
   const h = window.location.hash.replace(/^#\/?/, "");
-  return h === "welcome" || h === "rules" || h === "projects" || h === "setup"
+  return h === "welcome" ||
+    h === "rules" ||
+    h === "projects" ||
+    h === "setup" ||
+    h === "status"
     ? h
     : null;
 }
 
 export default function App() {
   const [settings, setSettings] = useState<Settings | null>(null);
-  const [signedIn, setSignedIn] = useState(false);
+  const [accounts, setAccounts] = useState<AccountSummary[] | null>(null);
   const [halted, setHalted] = useState(false);
 
   useEffect(() => {
     loadSettings().then(setSettings);
   }, []);
+
+  const refreshAccounts = useCallback(async () => {
+    try {
+      setAccounts(await listAccounts());
+    } catch {
+      setAccounts([]);
+    }
+  }, []);
+
+  useEffect(() => {
+    void refreshAccounts();
+  }, [refreshAccounts]);
 
   // Push every settings change to the background scheduler.
   useEffect(() => {
@@ -99,7 +121,7 @@ export default function App() {
     };
   }, []);
 
-  if (!settings) {
+  if (!settings || !accounts) {
     return (
       <main className="shell">
         <p>Loading…</p>
@@ -107,16 +129,45 @@ export default function App() {
     );
   }
 
-  const go = (step: OnboardingStep) => {
+  const done = settings.onboardingStep === "done";
+  const signedIn = accounts.length > 0;
+
+  const go = (step: View) => {
     window.location.hash = `#/${step}`;
-    void update({ ...settings, onboardingStep: step });
+    // During onboarding the step persists as progress; post-onboarding
+    // navigation is ephemeral and must not regress the saved step.
+    if (!done && step !== "status") {
+      void update({ ...settings, onboardingStep: step });
+    }
   };
 
-  const active: OnboardingStep =
-    stepFromHash() ?? (settings.onboardingStep === "done" ? "done" : settings.onboardingStep);
+  // Status-aware routing: signed-in users never land on the sign-in
+  // page, and finished users land on the dashboard by default.
+  const active: View = (() => {
+    const hash = stepFromHash();
+    if (done) {
+      if (hash === "rules" || hash === "projects" || hash === "setup") return hash;
+      if (hash === "welcome" && !signedIn) return "welcome";
+      return "status";
+    }
+    if (hash === "status") return settings.onboardingStep;
+    if (hash) {
+      if (hash === "welcome" && signedIn) return "rules";
+      return hash;
+    }
+    if (settings.onboardingStep === "welcome" && signedIn) return "rules";
+    return settings.onboardingStep;
+  })();
 
   // First-sign-in plan confirmation, shown exactly once.
   const showPlanModal = signedIn && !settings.seenPlanModal;
+
+  const sections: Array<{ view: View; label: string }> = [
+    { view: "status", label: "Status" },
+    { view: "rules", label: "Rules" },
+    { view: "projects", label: "Projects" },
+    { view: "setup", label: "Setup" },
+  ];
 
   return (
     <main className="shell">
@@ -143,20 +194,36 @@ export default function App() {
           onDismiss={() => void update({ ...settings, seenPlanModal: true })}
         />
       )}
+      {done && (
+        <nav className="top-nav" aria-label="Sections">
+          {sections.map((s) => (
+            <button
+              key={s.view}
+              className={`btn btn-ghost${active === s.view ? " active" : ""}`}
+              onClick={() => go(s.view)}
+            >
+              {s.label}
+            </button>
+          ))}
+        </nav>
+      )}
       {active === "welcome" && (
         <Welcome
+          accounts={accounts}
           onSignedIn={() => {
-            setSignedIn(true);
-            go("rules");
+            void refreshAccounts();
+            go(done ? "status" : "rules");
           }}
-          onExplore={() => go("rules")}
+          onExplore={() => go(done ? "status" : "rules")}
         />
       )}
       {active === "rules" && (
         <Rules
           settings={settings}
           onChange={update}
-          onBack={() => go("welcome")}
+          settingsMode={done}
+          hideBack={!done && signedIn}
+          onBack={() => go(done ? "status" : "welcome")}
           onNext={() => go("projects")}
         />
       )}
@@ -164,8 +231,8 @@ export default function App() {
         <Projects
           settings={settings}
           onChange={update}
-          onBack={() => go("rules")}
-          finished={false}
+          onBack={() => go(done ? "status" : "rules")}
+          finished={done}
           onNext={() => go("setup")}
         />
       )}
@@ -173,17 +240,17 @@ export default function App() {
         <Setup
           settings={settings}
           onChange={update}
-          onBack={() => go("projects")}
+          onBack={() => go(done ? "status" : "projects")}
           onFinish={() => void update({ ...settings, onboardingStep: "done" })}
+          settingsMode={done}
         />
       )}
-      {active === "done" && (
-        <Projects
+      {active === "status" && (
+        <Status
           settings={settings}
+          accounts={accounts}
           onChange={update}
-          onBack={() => go("rules")}
-          finished
-          onNext={() => go("setup")}
+          onNavigate={(view) => go(view)}
         />
       )}
     </main>

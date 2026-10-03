@@ -31,10 +31,10 @@ export default function Projects({
   return (
     <section className="page">
       <header className="page-head">
-        <h1>{finished ? "Donations" : "Pick your projects"}</h1>
+        <h1>{finished ? "Projects" : "Pick your projects"}</h1>
         <p className="lede">
           {finished
-            ? "You're set. Jobs run inside isolated sandboxes within your rules."
+            ? "Jobs run one at a time inside your rules."
             : "Every listing is manually approved. Pick any number — jobs run one at a time inside your rules."}
         </p>
       </header>
@@ -92,7 +92,7 @@ export default function Projects({
           </button>
         ) : (
           <button className="btn" onClick={onBack}>
-            Edit rules
+            Back to status
           </button>
         )}
       </nav>

@@ -122,3 +122,27 @@ export async function jobCancel(handleId: string): Promise<void> {
   if (!isTauri()) throw new Error("browser-dev");
   await invoke("job_cancel", { handleId });
 }
+
+export interface AccountSummary {
+  client_id: string;
+  email: string;
+  has_plan_usage: boolean;
+}
+
+/** Saved SIWC accounts. Empty before the first sign-in. */
+export async function listAccounts(): Promise<AccountSummary[]> {
+  if (!isTauri()) return [];
+  return invoke<AccountSummary[]>("list_accounts");
+}
+
+export interface SchedulerStatus {
+  configured: boolean;
+  activeJob: string | null;
+  lastVerdict: string;
+  consecutiveFailures: number;
+}
+
+export async function schedulerStatus(): Promise<SchedulerStatus> {
+  if (!isTauri()) throw new Error("browser-dev");
+  return invoke<SchedulerStatus>("scheduler_status");
+}

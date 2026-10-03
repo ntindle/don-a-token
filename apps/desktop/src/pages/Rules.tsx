@@ -7,6 +7,10 @@ interface Props {
   onChange: (s: Settings) => void;
   onBack: () => void;
   onNext: () => void;
+  /** Post-onboarding: single back-to-status nav instead of the chain. */
+  settingsMode?: boolean;
+  /** Onboarding while signed in: nothing before rules to go back to. */
+  hideBack?: boolean;
 }
 
 function num(v: string, fallback: number): number {
@@ -14,7 +18,7 @@ function num(v: string, fallback: number): number {
   return Number.isFinite(n) ? n : fallback;
 }
 
-export default function Rules({ settings, onChange, onBack, onNext }: Props) {
+export default function Rules({ settings, onChange, onBack, onNext, settingsMode, hideBack }: Props) {
   const r = settings.rules;
   const set = (patch: Partial<typeof r>) =>
     onChange({ ...settings, rules: { ...r, ...patch } });
@@ -130,12 +134,22 @@ export default function Rules({ settings, onChange, onBack, onNext }: Props) {
       <PlanBadge />
 
       <nav className="nav-row">
-        <button className="btn" onClick={onBack}>
-          Back
-        </button>
-        <button className="btn btn-primary" onClick={onNext}>
-          Pick your projects
-        </button>
+        {settingsMode ? (
+          <button className="btn" onClick={onBack}>
+            Back to status
+          </button>
+        ) : (
+          <>
+            {!hideBack && (
+              <button className="btn" onClick={onBack}>
+                Back
+              </button>
+            )}
+            <button className="btn btn-primary" onClick={onNext}>
+              Pick your projects
+            </button>
+          </>
+        )}
       </nav>
     </section>
   );
