@@ -32,11 +32,18 @@ pub enum PatchOutcome {
     Patch { patch: String, result_md: Option<String> },
 }
 
+/// Content framed by `begin`/`end` markers. Markers must stand alone
+/// on a line and the LAST pair wins: the agent's transcript can quote
+/// the bootstrap script itself (e.g. `ps` output embeds the whole
+/// `sh -c` command line, marker `echo`s included), so a bare
+/// substring match grabs script text between quoted markers instead
+/// of the real framing, which always prints last.
 fn section(text: &str, begin: &str, end: &str) -> Option<String> {
-    let start = text.find(begin)? + begin.len();
-    let rest = &text[start..];
-    let len = rest.find(end)?;
-    Some(rest[..len].trim_matches('\n').to_string())
+    let lines: Vec<&str> = text.lines().collect();
+    let start = lines.iter().rposition(|l| l.trim() == begin)?;
+    let after = &lines[start + 1..];
+    let len = after.iter().position(|l| l.trim() == end)?;
+    Some(after[..len].join("\n"))
 }
 
 /// Extract the exported patch (+ optional agent summary) from sandbox
@@ -49,6 +56,11 @@ pub fn extract_patch(stdout: &[u8]) -> PatchOutcome {
         // ("corrupt patch"); section() trims framing newlines, so
         // restore exactly one.
         let patch = format!("{}\n", patch.trim_end_matches('\n'));
+        // The framing may still be agent chatter quoting bare markers;
+        // only a real diff goes to publish.
+        if !patch.contains("diff --git ") {
+            return PatchOutcome::Missing;
+        }
         let result_md = section(&text, jobscript::MARK_RESULT_BEGIN, jobscript::MARK_RESULT_END);
         return PatchOutcome::Patch { patch, result_md };
     }
@@ -313,6 +325,36 @@ mod tests {
         let mut raw = framed("diff --git a/f", None);
         raw.extend_from_slice(b"note: NO_CHANGES=1 would mean empty\n");
         assert!(matches!(extract_patch(&raw), PatchOutcome::Patch { .. }));
+    }
+
+    #[test]
+    fn extract_ignores_script_text_quoted_in_transcript() {
+        // Regression test: the agent's transcript quoted the bootstrap
+        // script (its own `sh -c` command line via `ps`), whose marker
+        // echo lines fooled a bare substring match into extracting
+        // script text ("cat $WORK/changes.patch") as the patch. Markers
+        // must stand alone on a line, and the real (last) framing wins.
+        let mut raw = format!(
+            "agent ran ps and saw: sh -c 'echo ''{}''; cat \"$WORK/x\"; echo ''{}'''\n",
+            jobscript::MARK_PATCH_BEGIN,
+            jobscript::MARK_PATCH_END
+        )
+        .into_bytes();
+        raw.extend_from_slice(&framed("diff --git a/f b/f\n+new", None));
+        match extract_patch(&raw) {
+            PatchOutcome::Patch { patch, .. } => {
+                assert!(patch.contains("diff --git a/f"), "got: {patch}")
+            }
+            other => panic!("unexpected: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn extract_rejects_garbage_between_bare_markers() {
+        // Even when bare markers frame non-diff chatter (agent playing
+        // with the protocol), nothing goes to publish.
+        let out = extract_patch(&framed("just some notes\nno diff here", None));
+        assert_eq!(out, PatchOutcome::Missing);
     }
 
     #[test]
