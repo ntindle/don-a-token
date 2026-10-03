@@ -34,6 +34,16 @@ Implemented as `Backend` in `crates/core/src/runner.rs`; the narrow
 end-to-end loop (run → patch → PR) before trusting a sandbox with it.
 Never the default; the Setup UI labels it testing-only. Timeouts kill
 the whole process tree so no orphaned agent burns plan after the cap.
+The temp workdir (clone + `target/`) is removed when the job reaches a
+terminal state — retained workdirs once filled a donor disk.
+
+Host toolchain notes (Windows): the scheduler pins
+`RUSTUP_TOOLCHAIN` from the registry's `job.local_toolchain` so the
+agent's and the harness's `cargo` resolve to the project's toolchain
+instead of the host default triple (a bare `rust-toolchain.toml`
+channel resolves MSVC, which the donor may not have installed). The
+driver also prepends `~/bin/w64devkit`'s gcc to `PATH` when no gcc is
+found, since Git Bash ships none and GNU-target linking needs one.
 
 ## Job lifecycle
 
@@ -63,9 +73,10 @@ record, never in logs — captured output is redacted):
   exports its work as a patch on stdout (framed markers), and the host
   clones, applies, pushes, and opens the PR with `gh`.
 
-Codex runs as `codex exec` with the plan provider overrides, its own
-`workspace-write` sandbox on (defense-in-depth inside E2B), and no
-dangerous bypass flags.
+Codex runs as `codex exec --approve-for-me` with the plan provider
+overrides (codex-cli ≥ 0.157; `--full-auto` was removed and an explicit
+`--sandbox` conflicts with `--approve-for-me`, which already scopes to
+the workspace-write sandbox) and no dangerous bypass flags.
 
 ## Contribution authentication
 

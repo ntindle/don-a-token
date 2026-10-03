@@ -15,6 +15,7 @@ interface SchedulerProject {
   checks: string[];
   promptPack: string;
   maxMinutes: number;
+  localToolchain: string | null;
 }
 
 interface SchedulerConfig {
@@ -42,6 +43,7 @@ export function buildSchedulerConfig(settings: Settings): SchedulerConfig {
           prompt,
           checks: p.job.checks,
           promptPack: p.job.prompt_pack,
+          localToolchain: p.job.local_toolchain ?? null,
           maxMinutes: Math.min(
             p.job.max_minutes_per_job,
             settings.rules.maxMinutesPerJob,

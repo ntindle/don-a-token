@@ -404,6 +404,13 @@ async fn drive_job(app: AppHandle, handle_id: String, command: Vec<String>) {
     }
 }
 
+/// Native temp workdir for a local job. The scheduler removes it when
+/// the job reaches a terminal state so clones + target dirs can't fill
+/// the donor's disk; the patch/result are already captured in output.
+pub fn local_workdir_native(job_id: &str) -> PathBuf {
+    std::env::temp_dir().join(format!("don-a-token-job-{job_id}"))
+}
+
 /// Temp workdir for a local job, in posix form for Git Bash
 /// (`C:\...` -> `/c/...`; unchanged on unix). The bootstrap script
 /// creates it (`mkdir -p`).
@@ -451,6 +458,40 @@ fn resolve_sh() -> Result<PathBuf, String> {
         }
     }
     Err("local backend needs a POSIX shell (Git Bash on Windows)".to_string())
+}
+
+/// Windows local jobs: GNU-target cargo needs a mingw gcc for
+/// linking, and Git Bash ships none. When PATH lacks gcc, prepend the
+/// w64devkit dev install (`~/bin/w64devkit`) if present; otherwise log
+/// that link steps will fail. Unix donors use the system gcc.
+#[cfg(windows)]
+fn ensure_linker_on_path(cmd: &mut tokio::process::Command) {
+    let has_gcc = std::env::var_os("PATH")
+        .map(|p| std::env::split_paths(&p).any(|d| d.join("gcc.exe").is_file()))
+        .unwrap_or(false);
+    if has_gcc {
+        return;
+    }
+    let bin = std::env::var_os("USERPROFILE").map(|h| {
+        PathBuf::from(h)
+            .join("bin")
+            .join("w64devkit")
+            .join("w64devkit")
+            .join("bin")
+    });
+    match bin {
+        Some(bin) if bin.join("gcc.exe").is_file() => {
+            let mut paths = vec![bin];
+            if let Some(p) = std::env::var_os("PATH") {
+                paths.extend(std::env::split_paths(&p));
+            }
+            if let Ok(joined) = std::env::join_paths(paths) {
+                cmd.env("PATH", joined);
+                eprintln!("[runner] local: using ~/bin/w64devkit gcc for linking");
+            }
+        }
+        _ => eprintln!("[runner] local: no gcc on PATH; GNU-target link steps will fail"),
+    }
 }
 
 /// Fail fast when the host lacks the local-execution toolchain.
@@ -593,6 +634,8 @@ async fn drive_local(app: AppHandle, handle_id: String, command: Vec<String>) {
     let mut cmd = tokio::process::Command::new(&prog);
     cmd.args(&command[1..]);
     cmd.envs(envs);
+    #[cfg(windows)]
+    ensure_linker_on_path(&mut cmd);
     cmd.current_dir(std::env::temp_dir());
     cmd.stdout(std::process::Stdio::piped());
     cmd.stderr(std::process::Stdio::piped());

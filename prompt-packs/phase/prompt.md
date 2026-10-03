@@ -27,6 +27,9 @@ donated work.
 
 ## Constraints
 
+- The Rust toolchain is preconfigured for this repo (`RUSTUP_TOOLCHAIN`
+  / the project's pinned nightly). Use plain `cargo` commands; do not
+  switch toolchains or install components.
 - No breaking API changes. No network access beyond the repo itself.
 - No changes to CI workflows, release config, or lockfiles unless the
   task explicitly requires it.

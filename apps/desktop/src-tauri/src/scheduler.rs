@@ -33,6 +33,10 @@ pub struct SchedProject {
     pub checks: Vec<String>,
     pub prompt_pack: String,
     pub max_minutes: u32,
+    /// Local-backend only: forced RUSTUP_TOOLCHAIN (registry
+    /// `job.local_toolchain`). The E2B image owns its own toolchain.
+    #[serde(default)]
+    pub local_toolchain: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -323,12 +327,32 @@ async fn finish_active(app: &AppHandle, handle_id: &str, status: &str, exit_code
         }
     };
     let meta = app.state::<SchedulerState>().0.lock().await.active_meta.take();
+    let cleanup_job_id = meta.as_ref().map(|m| m.job_id.clone());
     let (final_status, detail, failed) = match (failed, meta) {
         (true, _) => (status.to_string(), None, true),
         (false, None) => ("succeeded".to_string(), None, false),
         (false, Some(meta)) => publish_succeeded(app, handle_id, &stdout, &meta).await,
     };
     append_log(app, handle_id, &project_id, &final_status, exit_code, detail.as_deref());
+    // Local backend: drop the temp workdir (clone + target/) now that
+    // the outcome is recorded; kept workdirs filled a donor disk.
+    if let Some(job_id) = cleanup_job_id {
+        let backend_is_local = app
+            .state::<SchedulerState>()
+            .0
+            .lock()
+            .await
+            .config
+            .as_ref()
+            .map(|c| c.runner.backend == don_a_token_core::runner::Backend::Local.name())
+            .unwrap_or(false);
+        if backend_is_local {
+            let dir = runner::local_workdir_native(&job_id);
+            if let Err(e) = std::fs::remove_dir_all(&dir) {
+                eprintln!("[sched] cleanup {}: {e}", dir.display());
+            }
+        }
+    }
     let sched = app.state::<SchedulerState>();
     let mut data = sched.0.lock().await;
     data.active_handle = None;
@@ -505,7 +529,7 @@ async fn submit_next(app: &AppHandle, config: &SchedulerConfig) {
     let b64 = base64::engine::general_purpose::STANDARD;
     // Only the plan token + prompt enter the sandbox. GitHub credentials
     // stay on the host; the PR is published from the exported patch.
-    let env = vec![
+    let mut env = vec![
         (
             codex::ENV_ACCESS_TOKEN.to_string(),
             access_token,
@@ -515,6 +539,16 @@ async fn submit_next(app: &AppHandle, config: &SchedulerConfig) {
             b64.encode(spec.prompt.as_bytes()),
         ),
     ];
+    // Local backend: pin the donor machine's cargo at the project's
+    // toolchain. Without this, rust-toolchain.toml's bare channel
+    // resolves to the host default triple (MSVC on Windows), which may
+    // not even be installed. E2B images carry their own toolchain, so
+    // this stays local-only.
+    if config.runner.backend == Backend::Local.name() {
+        if let Some(tc) = spec.local_toolchain.as_deref() {
+            env.push(("RUSTUP_TOOLCHAIN".to_string(), tc.to_string()));
+        }
+    }
     let max_minutes = spec.max_minutes.min(config.rules.max_minutes_per_job);
     let args = SubmitJobArgs {
         project_id: spec.id.clone(),
