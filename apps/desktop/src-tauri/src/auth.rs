@@ -510,6 +510,23 @@ pub async fn refresh_account(
     Ok(summarize(&record))
 }
 
+/// Refresh one account's tokens regardless of the due window. The
+/// scheduler calls this before submit when the stored token won't
+/// outlive the job. A lost rotation race surfaces as invalid_grant;
+/// callers must reload the record afterward either way.
+pub async fn force_refresh_account(app: AppHandle, client_id: &str) -> Result<(), String> {
+    let dir = creds_dir(&app)?;
+    let mut record =
+        credentials::load_record(&dir, client_id).map_err(|e| format!("load account: {e}"))?;
+    if record.refresh_token.is_none() {
+        return Err("no refresh token; please sign in again".to_string());
+    }
+    let client = http_client()?;
+    refresh_record(&client, &mut record).await?;
+    credentials::save_record(&dir, &record).map_err(|e| format!("save account: {e}"))?;
+    Ok(())
+}
+
 /// List saved ChatGPT accounts (no tokens leave the shell).
 #[tauri::command]
 pub async fn list_accounts(app: AppHandle) -> Result<Vec<AccountSummary>, String> {

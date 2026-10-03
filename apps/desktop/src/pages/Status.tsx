@@ -26,6 +26,8 @@ function describeVerdict(v: string): string {
       return "Not configured yet — finish setup to start donating.";
     case "waiting-for-sync":
       return "Waiting for the app window to confirm settings…";
+    case "job-auth-expired-retry":
+      return "Token expired mid-job — retrying with a fresh token.";
     case "restored":
     case "synced":
     case "submitted":

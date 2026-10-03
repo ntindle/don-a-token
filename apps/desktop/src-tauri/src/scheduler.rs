@@ -376,6 +376,14 @@ async fn finish_active(app: &AppHandle, handle_id: &str, status: &str, exit_code
         (false, None) => ("succeeded".to_string(), None, false),
         (false, Some(meta)) => publish_succeeded(app, handle_id, &stdout, &meta).await,
     };
+    // Mid-job token expiry is transient (the next submit mints fresh):
+    // retry without cooldown instead of burning a failure.
+    let auth_expired = failed && is_auth_expired_output(&stdout, &stderr);
+    let (final_status, failed) = if auth_expired {
+        ("auth-expired-retry".to_string(), false)
+    } else {
+        (final_status, failed)
+    };
     append_log(app, handle_id, &project_id, &final_status, exit_code, detail.as_deref());
     // Local backend: run the donor's cleanup command when set,
     // else the built-in delete per the retention setting.
@@ -418,7 +426,7 @@ async fn finish_active(app: &AppHandle, handle_id: &str, status: &str, exit_code
     let sched = app.state::<SchedulerState>();
     let mut data = sched.0.lock().await;
     data.active_handle = None;
-    data.last_finished = Some(Utc::now());
+    data.last_finished = if auth_expired { None } else { Some(Utc::now()) };
     if failed {
         data.consecutive_failures += 1;
         data.last_verdict = format!("job-failed: {final_status}");
@@ -443,6 +451,14 @@ fn should_remove_workdir(retention: Option<&str>, failed: bool) -> bool {
         Some("on-failure") => !failed,
         _ => true,
     }
+}
+
+/// True when a failed job's output shows the plan token expired
+/// mid-run (codex reports `token_expired`). Such jobs are retried with
+/// a fresh token, not counted as failures.
+fn is_auth_expired_output(stdout: &[u8], stderr: &[u8]) -> bool {
+    String::from_utf8_lossy(stdout).contains("token_expired")
+        || String::from_utf8_lossy(stderr).contains("token_expired")
 }
 
 /// Last 2KB of captured output for the debug log. Stored output is
@@ -566,7 +582,9 @@ async fn submit_next(app: &AppHandle, config: &SchedulerConfig) {
     let Some(spec) = config.projects.iter().find(|p| p.id == next_id) else {
         return;
     };
-    let (client_id, access_token) = match plan_account_token(app).await {
+    let max_minutes = spec.max_minutes.min(config.rules.max_minutes_per_job);
+    let horizon_secs = i64::from(max_minutes) * 60;
+    let (client_id, access_token) = match plan_account_token(app, horizon_secs).await {
         Ok(t) => t,
         Err(e) => {
             sched.0.lock().await.last_verdict = e;
@@ -624,7 +642,6 @@ async fn submit_next(app: &AppHandle, config: &SchedulerConfig) {
             env.push(("RUSTUP_TOOLCHAIN".to_string(), tc.to_string()));
         }
     }
-    let max_minutes = spec.max_minutes.min(config.rules.max_minutes_per_job);
     let args = SubmitJobArgs {
         project_id: spec.id.clone(),
         job_id: job_id.clone(),
@@ -671,27 +688,41 @@ fn truncate(s: &str, max: usize) -> String {
     s.chars().take(max).collect()
 }
 
-/// First saved account with plan usage, refreshed if due.
-/// Returns (client_id, access_token).
-async fn plan_account_token(app: &AppHandle) -> Result<(String, String), String> {
+/// First saved account with plan usage whose access token outlives
+/// `min_lifetime_secs` (force-refreshing when it doesn't; codex holds
+/// its copy in env for the whole run, so a token that merely isn't due
+/// yet can still 401 mid-job). Returns (client_id, access_token).
+async fn plan_account_token(
+    app: &AppHandle,
+    min_lifetime_secs: i64,
+) -> Result<(String, String), String> {
     let dir = app_dir(app)?;
     let ids = credentials::list_client_ids(&dir).map_err(|e| format!("list accounts: {e}"))?;
+    let horizon = Utc::now() + chrono::Duration::seconds(min_lifetime_secs);
     for id in ids {
-        let rec = match credentials::load_record(&dir, &id) {
+        let mut rec = match credentials::load_record(&dir, &id) {
             Ok(r) => r,
             Err(_) => continue,
         };
         if !rec.has_plan_usage() {
             continue;
         }
-        if rec.should_refresh(Utc::now()) {
-            if crate::auth::refresh_account(app.clone(), id.clone()).await.is_err() {
-                continue;
+        if rec.refresh_token.is_some() && rec.expires_at() < horizon {
+            // Reload afterward either way: on success for the rotated
+            // tokens, on failure in case the refresh loop won a race.
+            match crate::auth::force_refresh_account(app.clone(), &id).await {
+                Ok(()) => {
+                    if let Ok(fresh) = credentials::load_record(&dir, &id) {
+                        rec = fresh;
+                    }
+                }
+                Err(e) => {
+                    if let Ok(current) = credentials::load_record(&dir, &id) {
+                        rec = current;
+                    }
+                    eprintln!("[sched] pre-submit refresh {id}: {e}; using stored token");
+                }
             }
-            let Ok(fresh) = credentials::load_record(&dir, &id) else {
-                continue;
-            };
-            return Ok((id, fresh.access_token));
         }
         return Ok((id, rec.access_token));
     }
@@ -735,6 +766,15 @@ mod tests {
         assert_eq!(out[2]["a"], 1);
         assert_eq!(tail_history(text, 2).len(), 2);
         assert!(tail_history("", 10).is_empty());
+    }
+
+    #[test]
+    fn auth_expiry_detected_in_either_stream() {
+        let expired = br#"{"error_code": "token_expired"}"#;
+        assert!(is_auth_expired_output(expired, b"ok"));
+        assert!(is_auth_expired_output(b"ok", expired));
+        assert!(!is_auth_expired_output(b"exit 1", b"fatal: boom"));
+        assert!(!is_auth_expired_output(b"", b""));
     }
 
     #[test]
