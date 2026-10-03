@@ -205,6 +205,11 @@ pub fn publish_patch(spec: &PublishSpec, parent: &Path, patch: &str) -> Result<S
             "user.name=don-a-token".to_string(),
             "-c".to_string(),
             "user.email=donations@don-a-token.local".to_string(),
+            // Donors may sign all commits (commit.gpgsign=true); the
+            // headless publish path can't answer a passphrase prompt,
+            // so donated commits are explicitly unsigned.
+            "-c".to_string(),
+            "commit.gpgsign=false".to_string(),
             "commit".to_string(),
             "-m".to_string(),
             spec.title.to_string(),

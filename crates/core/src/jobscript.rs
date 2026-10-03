@@ -75,9 +75,12 @@ mkdir -p "$WORK"
 echo "$JOB_PROMPT_B64" | base64 -d > "$WORK/prompt.md"
 git clone --depth 1 --branch {base} {repo} "$REPO"
 cd "$REPO"
+BASE="$(git rev-parse HEAD)"
 ACCESS_TOKEN="$ACCESS_TOKEN" codex {codex} "$(cat "$WORK/prompt.md")"
 {checks}git add -N . >/dev/null 2>&1 || true
-git diff HEAD > "$WORK/changes.patch"
+# Diff against the pre-agent base: the agent commits its work, so a
+# bare `git diff HEAD` would come back empty and drop good patches.
+git diff "$BASE" > "$WORK/changes.patch"
 if [ ! -s "$WORK/changes.patch" ]; then echo NO_CHANGES=1; exit 0; fi
 if [ "$(wc -c < "$WORK/changes.patch")" -gt {patch_max} ]; then echo PATCH_TOO_LARGE=1; exit 0; fi
 echo '{mark_patch_begin}'
@@ -166,6 +169,9 @@ mod tests {
         assert!(script.contains("echo \"$JOB_PROMPT_B64\" | base64 -d"));
         assert!(script.contains("sh -c 'cargo test'"));
         assert!(script.contains("git add -N .")); // new files join the diff
+        assert!(script.contains("BASE=\"$(git rev-parse HEAD)\""));
+        assert!(script.contains("git diff \"$BASE\"")); // committed work included
+        assert!(!script.contains("git diff HEAD")); // ...never against moving HEAD
         assert!(script.contains(MARK_PATCH_BEGIN));
         assert!(script.contains(MARK_PATCH_END));
         assert!(script.contains(MARK_RESULT_BEGIN));
