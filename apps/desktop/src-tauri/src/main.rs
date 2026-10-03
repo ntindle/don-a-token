@@ -96,6 +96,14 @@ fn main() {
             scheduler::spawn_loop(app.handle().clone());
             Ok(())
         })
+        .on_window_event(|window, event| {
+            // Donation jobs run in the background: closing the window
+            // hides to the tray instead of quitting (tray menu has Quit).
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                api.prevent_close();
+                let _ = window.hide();
+            }
+        })
         .run(tauri::generate_context!())
         .expect("error while running don-a-token");
 }
