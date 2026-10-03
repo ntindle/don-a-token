@@ -7,6 +7,7 @@ import {
   type DeviceStart,
 } from "../lib/tauri";
 import type { Settings as AppSettings } from "../lib/settings";
+import registry from "../../../../projects/registry.json";
 
 interface Props {
   settings: AppSettings;
@@ -174,6 +175,36 @@ export default function Setup({ settings, onChange, onBack, onFinish }: Props) {
           artifacts (several GB). E2B sandboxes are always destroyed
           after the run.
         </p>
+        <label className="row">
+          <span>Custom cleanup command</span>
+          <input
+            type="text"
+            placeholder='e.g. rm -rf "$JOB_WORKDIR"'
+            value={settings.cleanupCommand ?? ""}
+            onChange={(e) =>
+              onChange({
+                ...settings,
+                cleanupCommand: e.target.value.trim() || null,
+              })
+            }
+          />
+        </label>
+        <p className="fineprint">
+          Optional shell command run after each local job with the job
+          dir in $JOB_WORKDIR. When empty, the retention choice above
+          applies. Failures are logged, never fail the job.
+        </p>
+        {settings.selectedProjectIds.map((id) => {
+          const p = registry.projects.find((q) => q.id === id);
+          const notes = (p?.job as { maintainer_notes?: string } | undefined)
+            ?.maintainer_notes;
+          if (!p || !notes) return null;
+          return (
+            <p key={id} className="fineprint">
+              <strong>{p.name} maintainer notes:</strong> {notes}
+            </p>
+          );
+        })}
       </div>
 
       <div className="card">

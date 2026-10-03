@@ -69,6 +69,10 @@
                 "type": "string",
                 "description": "Local-backend only: RUSTUP_TOOLCHAIN value forcing the donor machine's cargo at the project's pinned toolchain (the E2B image owns its own toolchain)."
               },
+              "maintainer_notes": {
+                "type": "string",
+                "description": "Maintainer-to-donor guidance shown in Setup: stack used, what jobs leave behind, what to install when running many jobs."
+              },
               "prompt_pack": { "type": "string", "minLength": 1 },
               "contribution": {
                 "type": "object",

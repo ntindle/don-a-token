@@ -494,6 +494,45 @@ fn ensure_linker_on_path(cmd: &mut tokio::process::Command) {
     }
 }
 
+/// Env var carrying the native workdir path to a donor cleanup command.
+pub const ENV_CLEANUP_WORKDIR: &str = "JOB_WORKDIR";
+/// Hard cap for a donor cleanup command; expiry is logged, not an error.
+const CLEANUP_TIMEOUT: Duration = Duration::from_secs(60);
+
+/// Run a donor-defined cleanup command after a local job. Best effort:
+/// timeouts and failures are logged and never fail the job.
+pub async fn run_custom_cleanup(workdir: &std::path::Path, command: &str) {
+    let sh = match resolve_sh() {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("[runner] cleanup: no shell: {e}");
+            return;
+        }
+    };
+    let mut cmd = tokio::process::Command::new(&sh);
+    cmd.args(["-c", command]);
+    cmd.env(ENV_CLEANUP_WORKDIR, workdir);
+    cmd.current_dir(std::env::temp_dir());
+    cmd.stdout(std::process::Stdio::piped());
+    cmd.stderr(std::process::Stdio::piped());
+    let mut child = match cmd.spawn() {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("[runner] cleanup: spawn: {e}");
+            return;
+        }
+    };
+    match timeout(CLEANUP_TIMEOUT, child.wait()).await {
+        Ok(Ok(exit)) => eprintln!("[runner] cleanup: exit {}", exit.code().unwrap_or(-1)),
+        Ok(Err(e)) => eprintln!("[runner] cleanup: wait: {e}"),
+        Err(_) => {
+            eprintln!("[runner] cleanup: timed out after 60s, killing");
+            let _ = child.kill().await;
+            let _ = child.wait().await;
+        }
+    }
+}
+
 /// Fail fast when the host lacks the local-execution toolchain.
 async fn preflight_local() -> Result<(), String> {
     let _ = resolve_sh()?;
@@ -952,6 +991,18 @@ mod tests {
     fn resolve_sh_finds_a_shell() {
         let sh = resolve_sh().unwrap();
         assert!(sh.is_file());
+    }
+
+    #[tokio::test]
+    async fn custom_cleanup_receives_workdir_and_never_fails() {
+        let dir = std::env::temp_dir()
+            .join(format!("dat-cleanup-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        run_custom_cleanup(&dir, "touch \"$JOB_WORKDIR/proof\"").await;
+        assert!(dir.join("proof").is_file());
+        // Failing commands are logged, not propagated (no panic = pass).
+        run_custom_cleanup(&dir, "exit 3").await;
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// Live smoke against a real backend (Embed or Cloud). Ignored by

@@ -38,6 +38,8 @@ export interface Settings {
   /** Contribution credential for opening PRs (device flow or pasted PAT). Keychain is the follow-up. */
   githubToken: string | null;
   workdirRetention: WorkdirRetention;
+  /** Donor-defined cleanup command for local jobs; null = built-in delete. */
+  cleanupCommand: string | null;
   seenPlanModal: boolean;
   onboardingStep: OnboardingStep;
 }
@@ -59,6 +61,7 @@ export const DEFAULT_SETTINGS: Settings = {
   e2bApiKey: null,
   githubToken: null,
   workdirRetention: "none",
+  cleanupCommand: null,
   seenPlanModal: false,
   onboardingStep: "welcome",
 };

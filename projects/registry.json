@@ -37,6 +37,7 @@
         "max_minutes_per_job": 60,
         "checks": ["cargo fmt --all -- --check", "cargo clippy --workspace --locked --all-targets -- -D warnings"],
         "local_toolchain": "nightly-2026-04-19-x86_64-pc-windows-gnu",
+        "maintainer_notes": "Uses Rust (pinned nightly, GNU target on Windows; the harness sets RUSTUP_TOOLCHAIN for local jobs). Each job leaves a repo clone plus several GB of build artifacts — the default cleanup deletes the whole workdir. Running many jobs? A shared sccache or pre-warmed cargo cache speeds up repeat builds.",
         "prompt_pack": "phase",
         "contribution": {
           "method": "pull-request",

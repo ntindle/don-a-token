@@ -35,9 +35,15 @@ end-to-end loop (run → patch → PR) before trusting a sandbox with it.
 Never the default; the Setup UI labels it testing-only. Timeouts kill
 the whole process tree so no orphaned agent burns plan after the cap.
 The temp workdir (clone + `target/`) is removed when the job reaches a
-terminal state — retained workdirs once filled a donor disk. Retention
-is a donor setting (Setup → job workdir cleanup): always remove
-(default), keep failed jobs for debugging, or keep everything.
+terminal state — retained workdirs once filled a donor disk. Cleanup
+is donor-configurable (Setup → Runner backend): an optional custom
+cleanup command (run via `sh -c` with the job dir in `JOB_WORKDIR`,
+60s cap, failures logged and never fatal), else the built-in delete
+under a retention choice — always remove (default), keep failed jobs
+for debugging, or keep everything. Each selected project's
+`maintainer_notes` from the registry are shown next to the field so
+the donor knows the stack, what jobs leave behind, and what to
+install when running many jobs.
 
 Host toolchain notes (Windows): the scheduler pins
 `RUSTUP_TOOLCHAIN` from the registry's `job.local_toolchain` so the
