@@ -21,6 +21,8 @@ pub enum Backend {
     E2bCloud,
     /// Local Docker/Podman fallback. Weakest containment; last resort.
     DockerLocal,
+    /// Direct on-host execution. NO isolation; testing only.
+    Local,
 }
 
 impl Backend {
@@ -43,6 +45,7 @@ impl Backend {
             Backend::EmbedRemote { .. } => "embed-remote",
             Backend::E2bCloud => "e2b-cloud",
             Backend::DockerLocal => "docker-local",
+            Backend::Local => "local",
         }
     }
 }

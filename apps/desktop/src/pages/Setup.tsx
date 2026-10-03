@@ -120,6 +120,7 @@ export default function Setup({ settings, onChange, onBack, onFinish }: Props) {
             <option value="embed-remote">E2B Embed, remote node</option>
             <option value="e2b-cloud">E2B Cloud</option>
             <option value="docker-local">Local containers (coming soon)</option>
+            <option value="local">Local machine (no isolation — testing only)</option>
           </select>
         </label>
         {settings.runnerBackend === "embed-remote" && (

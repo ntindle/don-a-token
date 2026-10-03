@@ -73,23 +73,23 @@ pub fn app_server_args() -> Vec<String> {
 
 /// `codex exec` arguments for an unattended plan-usage run inside a
 /// sandbox. The prompt itself is appended as the final argv by the caller.
-/// Keeps Codex's own workspace-write sandbox as defense-in-depth (the
-/// E2B sandbox is the outer layer). No `-m`: Codex resolves its default
-/// model through the overridden provider.
+/// `--approve-for-me` (codex-cli >= 0.157) routes approval requests
+/// through automatic review under the workspace-write sandbox — it
+/// conflicts with an explicit `--sandbox`, which is why none is passed.
+/// The E2B sandbox remains the outer layer. No `-m`: Codex resolves its
+/// default model through the overridden provider.
 pub fn exec_args(workdir: &str, result_file: &str) -> Vec<String> {
     let mut args = vec![
         "exec".to_string(),
         "-C".to_string(),
         workdir.to_string(),
-        "--sandbox".to_string(),
-        "workspace-write".to_string(),
         "--json".to_string(),
         "-o".to_string(),
         result_file.to_string(),
         "--ignore-user-config".to_string(),
-        // Headless per E2B's Codex guide: auto-approve inside the sandbox
-        // (outer isolation layer) and skip git ownership checks.
-        "--full-auto".to_string(),
+        // Headless: auto-review approvals (`--full-auto` was removed in
+        // codex-cli 0.157) and skip git ownership checks.
+        "--approve-for-me".to_string(),
         "--skip-git-repo-check".to_string(),
     ];
     args.extend(config_args());
@@ -147,9 +147,9 @@ mod tests {
         let args = exec_args("/work/repo", "/work/result.txt");
         let joined = args.join(" ");
         assert!(joined.starts_with("exec -C /work/repo"));
-        assert!(joined.contains("--sandbox workspace-write"));
+        assert!(!joined.contains("--sandbox")); // conflicts with --approve-for-me
         assert!(joined.contains("--ignore-user-config"));
-        assert!(joined.contains("--full-auto"));
+        assert!(joined.contains("--approve-for-me"));
         assert!(joined.contains("--skip-git-repo-check"));
         assert!(joined.contains("model_provider=\"openai_chatgpt_plan\""));
         assert!(joined.contains("env_key=\"ACCESS_TOKEN\""));

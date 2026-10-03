@@ -21,7 +21,8 @@ export type RunnerBackend =
   | "embed-local"
   | "embed-remote"
   | "e2b-cloud"
-  | "docker-local";
+  | "docker-local"
+  | "local";
 
 export interface Settings {
   rules: DonationRules;

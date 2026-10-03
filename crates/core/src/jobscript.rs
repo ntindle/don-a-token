@@ -72,7 +72,7 @@ pub fn build_bootstrap(spec: &BootstrapSpec) -> String {
 WORK={work}
 REPO="$WORK/repo"
 mkdir -p "$WORK"
-echo "${ENV_JOB_PROMPT_B64}" | base64 -d > "$WORK/prompt.md"
+echo "$JOB_PROMPT_B64" | base64 -d > "$WORK/prompt.md"
 git clone --depth 1 --branch {base} {repo} "$REPO"
 cd "$REPO"
 ACCESS_TOKEN="$ACCESS_TOKEN" codex {codex} "$(cat "$WORK/prompt.md")"
@@ -163,6 +163,7 @@ mod tests {
         assert!(script
             .contains("git clone --depth 1 --branch 'main' 'https://github.com/phase-rs/phase'"));
         assert!(script.contains("codex 'exec'"));
+        assert!(script.contains("echo \"$JOB_PROMPT_B64\" | base64 -d"));
         assert!(script.contains("sh -c 'cargo test'"));
         assert!(script.contains("git add -N .")); // new files join the diff
         assert!(script.contains(MARK_PATCH_BEGIN));

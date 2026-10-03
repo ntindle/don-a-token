@@ -15,7 +15,7 @@ tauri-plugin-autostart = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 chrono = { version = "0.4", features = ["serde", "clock"] }
-tokio = { version = "1", features = ["rt", "net", "sync", "time", "macros", "io-util"] }
+tokio = { version = "1", features = ["rt", "net", "sync", "time", "macros", "io-util", "process"] }
 reqwest = { version = "0.12", features = ["json", "rustls-tls"] }
 jsonwebtoken = { version = "10", features = ["rust_crypto"] }
 url = "2"

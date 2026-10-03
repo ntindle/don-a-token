@@ -10,6 +10,7 @@ use base64::Engine as _;
 use chrono::{DateTime, Utc};
 use don_a_token_core::projects::pick_next;
 use don_a_token_core::rules::DonationRules;
+use don_a_token_core::runner::Backend;
 use don_a_token_core::{codex, credentials, jobscript};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager, State};
@@ -58,6 +59,7 @@ struct ActiveJobMeta {
     pr_title: String,
     pr_body: String,
     github_token: Option<String>,
+    fork_owner: Option<String>,
 }
 
 struct SchedulerData {
@@ -302,7 +304,7 @@ async fn tick(app: &AppHandle) {
 }
 
 async fn finish_active(app: &AppHandle, handle_id: &str, status: &str, exit_code: Option<i32>) {
-    let (project_id, failed, stdout) = {
+    let (project_id, failed, stdout, stderr) = {
         let jobs = app.state::<JobState>();
         let guard = jobs.0.lock().await;
         match guard.get(handle_id) {
@@ -310,9 +312,14 @@ async fn finish_active(app: &AppHandle, handle_id: &str, status: &str, exit_code
                 let failed = !matches!(rec.status, don_a_token_core::runner::JobStatus::Succeeded);
                 // project id is the handle prefix ("{project}-{job}").
                 let project = handle_id.split('-').next().unwrap_or("?").to_string();
-                (project, failed, rec.output.stdout.clone())
+                (
+                    project,
+                    failed,
+                    rec.output.stdout.clone(),
+                    rec.output.stderr.clone(),
+                )
             }
-            None => ("?".to_string(), true, Vec::new()),
+            None => ("?".to_string(), true, Vec::new(), Vec::new()),
         }
     };
     let meta = app.state::<SchedulerState>().0.lock().await.active_meta.take();
@@ -334,6 +341,16 @@ async fn finish_active(app: &AppHandle, handle_id: &str, status: &str, exit_code
         data.halted_emitted = false;
         data.last_verdict = format!("job-{final_status}");
     }
+    eprintln!("[sched] job {handle_id} finished: {final_status} (failed={failed})");
+    eprintln!("[sched] stdout tail:\n{}", tail_str(&stdout));
+    eprintln!("[sched] stderr tail:\n{}", tail_str(&stderr));
+}
+
+/// Last 2KB of captured output for the debug log. Stored output is
+/// already redacted by the drivers, so this is safe to print.
+fn tail_str(bytes: &[u8]) -> String {
+    let start = bytes.len().saturating_sub(2048);
+    String::from_utf8_lossy(&bytes[start..]).into_owned()
 }
 
 /// Host-side publish for a succeeded sandbox run. Returns
@@ -366,6 +383,7 @@ async fn publish_succeeded(
                 result_md.clone(),
                 meta.job_id.clone(),
                 patch.clone(),
+                meta.fork_owner.clone(),
             );
             let res = tokio::task::spawn_blocking(move || {
                 let spec = publish::PublishSpec {
@@ -377,6 +395,7 @@ async fn publish_succeeded(
                     result_md: owned.5.as_deref(),
                     github_token: &token,
                     job_tag: &owned.6,
+                    fork_owner: owned.8.as_deref(),
                 };
                 publish::publish_patch(&spec, &std::env::temp_dir(), &owned.7)
             })
@@ -466,16 +485,23 @@ async fn submit_next(app: &AppHandle, config: &SchedulerConfig) {
     );
     let pr_title = format!("don-a-token({}): automated contribution {job_id}", spec.id);
     let pr_body = jobscript::pr_body(&spec.id, &footer);
-    // Home-relative: sandboxes run as non-root `user`, so /work is not writable.
-    let exec = jobscript::standard_exec_args("/home/user/job");
+    // Sandboxes run as non-root `user`, so /work is not writable; local
+    // jobs use a posix-shaped temp dir for Git Bash.
+    let workdir = if config.runner.backend == Backend::Local.name() {
+        runner::local_workdir_posix(&job_id)
+    } else {
+        "/home/user/job".to_string()
+    };
+    let exec = jobscript::standard_exec_args(&workdir);
     let bspec = jobscript::BootstrapSpec {
         repo_url: &spec.repo,
         base_branch: &spec.base_branch,
-        workdir: "/home/user/job",
+        workdir: &workdir,
         checks: &spec.checks,
         codex_args: &exec,
     };
     let script = jobscript::build_bootstrap(&bspec);
+    eprintln!("[sched] bootstrap script ({} bytes):\n{}", script.len(), script);
     let b64 = base64::engine::general_purpose::STANDARD;
     // Only the plan token + prompt enter the sandbox. GitHub credentials
     // stay on the host; the PR is published from the exported patch.
@@ -506,21 +532,28 @@ async fn submit_next(app: &AppHandle, config: &SchedulerConfig) {
             data.active_handle = Some(handle.id);
             data.active_meta = Some(ActiveJobMeta {
                 project_id: spec.id.clone(),
-                job_id,
+                job_id: job_id.clone(),
                 repo: spec.repo.clone(),
                 base_branch: spec.base_branch.clone(),
                 branch,
                 pr_title,
                 pr_body,
                 github_token: config.github_token.clone(),
+                fork_owner: publish::fork_owner_for(config.donor.as_deref(), &spec.repo)
+                    .map(str::to_string),
             });
             data.last_project_id = Some(spec.id.clone());
             data.last_verdict = "submitted".to_string();
+            eprintln!(
+                "[sched] submitted {} job {} via {}",
+                spec.id, job_id, config.runner.backend
+            );
         }
         Err(e) => {
             let mut data = sched.0.lock().await;
             data.consecutive_failures += 1;
             data.last_verdict = format!("submit-failed: {}", truncate(&e, 120));
+            eprintln!("[sched] submit failed: {e}");
         }
     }
 }
@@ -601,7 +634,7 @@ mod tests {
                 "promptPack": "phase",
                 "maxMinutes": 30
             }],
-            "runner": { "api_base": "http://127.0.0.1:3000", "api_key": null, "sandbox_base": null },
+            "runner": { "backend": "e2b-cloud", "api_base": "http://127.0.0.1:3000", "api_key": null, "sandbox_base": null },
             "donor": "octocat",
             "githubToken": null
         });

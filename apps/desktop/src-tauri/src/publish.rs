@@ -19,6 +19,8 @@ pub struct PublishSpec<'a> {
     pub result_md: Option<&'a str>,
     pub github_token: &'a str,
     pub job_tag: &'a str,
+    /// Push target owner when it differs from upstream (donor fork).
+    pub fork_owner: Option<&'a str>,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -60,8 +62,56 @@ pub fn git_clone_args(repo: &str, base: &str, dir: &str) -> Vec<String> {
         .to_vec()
 }
 
-pub fn git_push_args(branch: &str) -> Vec<String> {
-    ["push", "origin", branch].map(str::to_string).to_vec()
+pub fn git_push_args(remote: &str, branch: &str) -> Vec<String> {
+    ["push", remote, branch].map(str::to_string).to_vec()
+}
+
+/// Fork owner for publishing: the donor, unless they own the upstream
+/// repo (then push straight to origin). Owner compare is case-insensitive.
+pub fn fork_owner_for<'a>(donor: Option<&'a str>, repo_url: &str) -> Option<&'a str> {
+    let donor = donor?;
+    let slug = jobscript::repo_slug(repo_url)?;
+    let owner = slug.split('/').next()?;
+    if donor.eq_ignore_ascii_case(owner) {
+        None
+    } else {
+        Some(donor)
+    }
+}
+
+/// Make sure `<fork_owner>/<repo>` exists, creating the fork when it
+/// doesn't. Re-checks after a failed fork so an already-existing fork
+/// (e.g. created by hand mid-job) still proceeds.
+fn ensure_fork(
+    token: &str,
+    upstream_slug: &str,
+    fork_owner: &str,
+    repo: &str,
+    workdir: &Path,
+) -> Result<(), String> {
+    let view = [
+        "repo".to_string(),
+        "view".to_string(),
+        format!("{fork_owner}/{repo}"),
+    ];
+    if run("gh", &view, workdir, &gh_env(token)).is_ok() {
+        return Ok(());
+    }
+    let forked = run(
+        "gh",
+        &[
+            "repo".to_string(),
+            "fork".to_string(),
+            upstream_slug.to_string(),
+            "--clone=false".to_string(),
+        ],
+        workdir,
+        &gh_env(token),
+    );
+    if forked.is_err() && run("gh", &view, workdir, &gh_env(token)).is_err() {
+        return Err(forked.unwrap_err());
+    }
+    Ok(())
 }
 
 pub fn gh_pr_create_args(slug: &str, head: &str, base: &str, title: &str, body_file: &str) -> Vec<String> {
@@ -125,6 +175,8 @@ fn run(bin: &str, args: &[String], dir: &Path, env: &[(String, String)]) -> Resu
 pub fn publish_patch(spec: &PublishSpec, parent: &Path, patch: &str) -> Result<String, String> {
     let slug = jobscript::repo_slug(spec.repo_url)
         .ok_or_else(|| format!("not a github repo url: {}", spec.repo_url))?;
+    let upstream_owner = slug.split('/').next().unwrap_or_default().to_string();
+    let repo_name = slug.split('/').nth(1).unwrap_or_default().to_string();
     let dir: PathBuf = parent.join(format!("don-a-token-publish-{}", spec.job_tag));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).map_err(|e| format!("mkdir publish dir: {e}"))?;
@@ -160,8 +212,26 @@ pub fn publish_patch(spec: &PublishSpec, parent: &Path, patch: &str) -> Result<S
         &repo,
         &[],
     ))?;
+    let (push_remote, head) = match spec.fork_owner {
+        Some(fork) if !fork.eq_ignore_ascii_case(&upstream_owner) => {
+            ensure_fork(spec.github_token, &slug, fork, &repo_name, &dir)?;
+            step(run(
+                "git",
+                &[
+                    "remote".to_string(),
+                    "add".to_string(),
+                    "fork".to_string(),
+                    format!("https://github.com/{fork}/{repo_name}.git"),
+                ],
+                &repo,
+                &[],
+            ))?;
+            ("fork", format!("{fork}:{}", spec.branch))
+        }
+        _ => ("origin", spec.branch.to_string()),
+    };
     let push_env = git_push_env(spec.github_token);
-    if let Err(e) = run("git", &git_push_args(spec.branch), &repo, &push_env) {
+    if let Err(e) = run("git", &git_push_args(push_remote, spec.branch), &repo, &push_env) {
         return Err(failed(e));
     }
     let mut body = spec.body.to_string();
@@ -176,7 +246,7 @@ pub fn publish_patch(spec: &PublishSpec, parent: &Path, patch: &str) -> Result<S
         "gh",
         &gh_pr_create_args(
             &slug,
-            spec.branch,
+            &head,
             spec.base_branch,
             spec.title,
             &body_file.to_string_lossy(),
@@ -243,7 +313,8 @@ mod tests {
             git_clone_args("https://github.com/o/r", "main", "repo"),
             vec!["clone", "--depth", "1", "--branch", "main", "https://github.com/o/r", "repo"]
         );
-        assert_eq!(git_push_args("b"), vec!["push", "origin", "b"]);
+        assert_eq!(git_push_args("origin", "b"), vec!["push", "origin", "b"]);
+        assert_eq!(git_push_args("fork", "b"), vec!["push", "fork", "b"]);
         let pr = gh_pr_create_args("o/r", "head", "main", "t", "body.md");
         assert_eq!(pr[..3], vec!["pr", "create", "--repo"]);
         assert!(pr.contains(&"o/r".to_string()));
@@ -259,6 +330,24 @@ mod tests {
     }
 
     #[test]
+    fn fork_owner_for_compares_donor_to_upstream() {
+        assert_eq!(
+            fork_owner_for(Some("donor"), "https://github.com/upstream/repo"),
+            Some("donor")
+        );
+        assert_eq!(
+            fork_owner_for(Some("owner"), "https://github.com/owner/repo"),
+            None
+        );
+        assert_eq!(
+            fork_owner_for(Some("OWNER"), "https://github.com/owner/repo"),
+            None
+        );
+        assert_eq!(fork_owner_for(None, "https://github.com/u/r"), None);
+        assert_eq!(fork_owner_for(Some("d"), "https://example.com/u/r"), None);
+    }
+
+    #[test]
     fn publish_rejects_non_github_url() {
         let spec = PublishSpec {
             repo_url: "https://example.com/o/r",
@@ -269,6 +358,7 @@ mod tests {
             result_md: None,
             github_token: "x",
             job_tag: "test-no-net",
+            fork_owner: None,
         };
         let err = publish_patch(&spec, &std::env::temp_dir(), "patch").unwrap_err();
         assert!(err.contains("not a github repo url"));

@@ -9,15 +9,17 @@
 //! template pre-warming are follow-ups.
 
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::time::Duration;
 
 use don_a_token_core::e2b::{self, CommandOutput, E2bConfig, SandboxCreated};
 use don_a_token_core::jobscript;
-use don_a_token_core::runner::{JobHandle, JobStatus};
+use don_a_token_core::runner::{Backend, JobHandle, JobStatus};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager, State};
+use tokio::io::AsyncReadExt;
 use tokio::sync::Mutex;
-use tokio::time::timeout;
+use tokio::time::{timeout, timeout_at};
 
 const HTTP_TIMEOUT: Duration = Duration::from_secs(30);
 /// Extra sandbox lifetime beyond the job's own cap, for setup/teardown.
@@ -210,12 +212,14 @@ async fn collect_stream(mut res: reqwest::Response) -> Result<CommandOutput, Str
 #[derive(Debug)]
 pub(crate) struct JobRecord {
     pub(crate) sandbox_id: String,
-    pub(crate) sandbox: SandboxCreated,
+    pub(crate) sandbox: Option<SandboxCreated>,
     pub(crate) cfg: E2bConfig,
     pub(crate) status: JobStatus,
     pub(crate) output: CommandOutput,
     pub(crate) max_minutes: u32,
     pub(crate) env_vars: Vec<(String, String)>,
+    /// Host pid of a local-backend job, for cancel/timeout tree-kill.
+    pub(crate) local_pid: Option<u32>,
 }
 
 #[derive(Default)]
@@ -223,6 +227,8 @@ pub struct JobState(pub Mutex<HashMap<String, JobRecord>>);
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct RunnerConfigArgs {
+    /// Backend name (`Backend::name`); `"local"` runs on-host, no isolation.
+    pub backend: String,
     pub api_base: String,
     pub api_key: Option<String>,
     pub sandbox_base: Option<String>,
@@ -296,6 +302,12 @@ pub async fn submit_job_inner(
         api_key: config.api_key,
         sandbox_base: config.sandbox_base,
     };
+    let handle = JobHandle {
+        id: format!("{}-{}", job.project_id, job.job_id),
+    };
+    if config.backend == Backend::Local.name() {
+        return submit_local(&app, jobs, cfg, job, handle).await;
+    }
     let runner = E2bRunner::new(cfg.clone())?;
     let timeout_secs = u64::from(job.max_minutes) * 60 + SANDBOX_MARGIN_SECS;
     let metadata = serde_json::json!({
@@ -308,19 +320,17 @@ pub async fn submit_job_inner(
         .create_sandbox(&job.template, timeout_secs, metadata, serde_json::json!({}))
         .await?;
 
-    let handle = JobHandle {
-        id: format!("{}-{}", job.project_id, job.job_id),
-    };
     jobs.0.lock().await.insert(
         handle.id.clone(),
         JobRecord {
             sandbox_id: sandbox.sandbox_id.clone(),
-            sandbox,
+            sandbox: Some(sandbox),
             cfg,
             status: JobStatus::Running,
             output: CommandOutput::default(),
             max_minutes: job.max_minutes,
             env_vars: job.env,
+            local_pid: None,
         },
     );
 
@@ -349,6 +359,19 @@ async fn drive_job(app: AppHandle, handle_id: String, command: Vec<String>) {
                 return;
             }
         };
+        let Some(sandbox) = rec.sandbox.clone() else {
+            drop(guard);
+            finish_job(
+                &app,
+                &handle_id,
+                JobStatus::Failed {
+                    reason: "no sandbox".to_string(),
+                },
+                None,
+            )
+            .await;
+            return;
+        };
         let envs: serde_json::Value = rec
             .env_vars
             .iter()
@@ -357,7 +380,7 @@ async fn drive_job(app: AppHandle, handle_id: String, command: Vec<String>) {
         let secrets: Vec<String> = rec.env_vars.iter().map(|(_, v)| v.clone()).collect();
         (
             runner,
-            rec.sandbox.clone(),
+            sandbox,
             rec.max_minutes,
             envs,
             secrets,
@@ -371,27 +394,291 @@ async fn drive_job(app: AppHandle, handle_id: String, command: Vec<String>) {
     let _ = runner.kill_sandbox(&sandbox.sandbox_id).await;
 
     match outcome {
-        Ok(mut output) => {
-            let refs: Vec<&str> = secrets.iter().map(String::as_str).collect();
-            output.stdout = jobscript::redact(std::mem::take(&mut output.stdout), &refs);
-            output.stderr = jobscript::redact(std::mem::take(&mut output.stderr), &refs);
-            let status = if output.succeeded() {
-                JobStatus::Succeeded
-            } else {
-                JobStatus::Failed {
-                    reason: output
-                        .error
-                        .clone()
-                        .unwrap_or_else(|| format!("exit {}", output.exit_code.unwrap_or(-1))),
-                }
-            };
-            finish_job(&app, &handle_id, status, Some(output)).await;
-        }
+        Ok(output) => finish_output(&app, &handle_id, output, &secrets).await,
         Err(e) if e == "command timed out" => {
             finish_job(&app, &handle_id, JobStatus::TimedOut, None).await;
         }
         Err(e) => {
             finish_job(&app, &handle_id, JobStatus::Failed { reason: e }, None).await;
+        }
+    }
+}
+
+/// Temp workdir for a local job, in posix form for Git Bash
+/// (`C:\...` -> `/c/...`; unchanged on unix). The bootstrap script
+/// creates it (`mkdir -p`).
+pub fn local_workdir_posix(job_id: &str) -> String {
+    let native = std::env::temp_dir().join(format!("don-a-token-job-{job_id}"));
+    let s = native.to_string_lossy().replace('\\', "/");
+    let b = s.as_bytes();
+    if b.len() > 2 && b[1] == b':' && b[0].is_ascii_alphabetic() {
+        format!("/{}{}", b[0].to_ascii_lowercase() as char, &s[2..])
+    } else {
+        s
+    }
+}
+
+/// `sh` for local jobs. Prefers Git Bash on Windows (the `bash.exe` on
+/// PATH is usually the WSL launcher, which is the wrong machine); plain
+/// PATH lookup elsewhere.
+fn resolve_sh() -> Result<PathBuf, String> {
+    #[cfg(windows)]
+    for fixed in [
+        "C:\\Program Files\\Git\\bin\\bash.exe",
+        "C:\\Program Files (x86)\\Git\\bin\\bash.exe",
+    ] {
+        let p = PathBuf::from(fixed);
+        if p.is_file() {
+            return Ok(p);
+        }
+    }
+    #[cfg(windows)]
+    let want: &[&str] = &["bash.exe", "sh.exe"];
+    #[cfg(not(windows))]
+    let want: &[&str] = &["sh"];
+    if let Some(path) = std::env::var_os("PATH") {
+        for dir in std::env::split_paths(&path) {
+            #[cfg(windows)]
+            if dir.to_string_lossy().to_lowercase().contains("system32") {
+                continue; // WSL launcher, not a local shell
+            }
+            for name in want {
+                let p = dir.join(name);
+                if p.is_file() {
+                    return Ok(p);
+                }
+            }
+        }
+    }
+    Err("local backend needs a POSIX shell (Git Bash on Windows)".to_string())
+}
+
+/// Fail fast when the host lacks the local-execution toolchain.
+async fn preflight_local() -> Result<(), String> {
+    let _ = resolve_sh()?;
+    let ok = tokio::process::Command::new("codex")
+        .arg("--version")
+        .output()
+        .await
+        .map(|o| o.status.success())
+        .unwrap_or(false);
+    if !ok {
+        return Err("local backend needs the codex CLI on PATH".to_string());
+    }
+    Ok(())
+}
+
+/// Kill a local job's whole process tree. Best effort; the caller
+/// ignores errors (the pid may already be gone).
+async fn kill_tree(pid: u32) {
+    #[cfg(windows)]
+    {
+        let _ = tokio::process::Command::new("taskkill")
+            .args(["/F", "/T", "/PID", &pid.to_string()])
+            .output()
+            .await;
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = tokio::process::Command::new("pkill")
+            .args(["-9", "-P", &pid.to_string()])
+            .output()
+            .await;
+        let _ = tokio::process::Command::new("kill")
+            .args(["-9", &pid.to_string()])
+            .output()
+            .await;
+    }
+}
+
+/// Redact secrets, map exit to status, record terminal state. Shared by
+/// the E2B and local drivers.
+async fn finish_output(
+    app: &AppHandle,
+    handle_id: &str,
+    mut output: CommandOutput,
+    secrets: &[String],
+) {
+    let refs: Vec<&str> = secrets.iter().map(String::as_str).collect();
+    output.stdout = jobscript::redact(std::mem::take(&mut output.stdout), &refs);
+    output.stderr = jobscript::redact(std::mem::take(&mut output.stderr), &refs);
+    let status = if output.succeeded() {
+        JobStatus::Succeeded
+    } else {
+        JobStatus::Failed {
+            reason: output
+                .error
+                .clone()
+                .unwrap_or_else(|| format!("exit {}", output.exit_code.unwrap_or(-1))),
+        }
+    };
+    finish_job(app, handle_id, status, Some(output)).await;
+}
+
+/// Submit a local job: no sandbox; the command runs on-host.
+/// `submit_job_inner` routes here for `backend == "local"`.
+async fn submit_local(
+    app: &AppHandle,
+    jobs: &JobState,
+    cfg: E2bConfig,
+    job: SubmitJobArgs,
+    handle: JobHandle,
+) -> Result<JobHandleView, String> {
+    preflight_local().await?;
+    jobs.0.lock().await.insert(
+        handle.id.clone(),
+        JobRecord {
+            sandbox_id: "local".to_string(),
+            sandbox: None,
+            cfg,
+            status: JobStatus::Running,
+            output: CommandOutput::default(),
+            max_minutes: job.max_minutes,
+            env_vars: job.env,
+            local_pid: None,
+        },
+    );
+    let app_clone = app.clone();
+    let handle_id = handle.id.clone();
+    let command = job.command.clone();
+    tauri::async_runtime::spawn(async move {
+        drive_local(app_clone, handle_id, command).await;
+    });
+    Ok(JobHandleView { id: handle.id })
+}
+
+/// Run the job command directly on the host, capturing output. On
+/// timeout the whole tree is killed while the parent is still alive, so
+/// no orphaned agent keeps burning plan after the cap.
+async fn drive_local(app: AppHandle, handle_id: String, command: Vec<String>) {
+    if command.len() < 2 {
+        finish_job(
+            &app,
+            &handle_id,
+            JobStatus::Failed {
+                reason: "job command has no argv".to_string(),
+            },
+            None,
+        )
+        .await;
+        return;
+    }
+    let (max_minutes, envs, secrets) = {
+        let jobs = app.state::<JobState>();
+        let guard = jobs.0.lock().await;
+        let Some(rec) = guard.get(&handle_id) else {
+            return;
+        };
+        (
+            rec.max_minutes,
+            rec.env_vars.clone(),
+            rec.env_vars
+                .iter()
+                .map(|(_, v)| v.clone())
+                .collect::<Vec<_>>(),
+        )
+    };
+
+    let prog = if command.first().map(String::as_str) == Some("sh") {
+        match resolve_sh() {
+            Ok(p) => p,
+            Err(e) => {
+                finish_job(&app, &handle_id, JobStatus::Failed { reason: e }, None).await;
+                return;
+            }
+        }
+    } else {
+        PathBuf::from(&command[0])
+    };
+    let mut cmd = tokio::process::Command::new(&prog);
+    cmd.args(&command[1..]);
+    cmd.envs(envs);
+    cmd.current_dir(std::env::temp_dir());
+    cmd.stdout(std::process::Stdio::piped());
+    cmd.stderr(std::process::Stdio::piped());
+    cmd.kill_on_drop(true);
+    let mut child = match cmd.spawn() {
+        Ok(c) => c,
+        Err(e) => {
+            finish_job(
+                &app,
+                &handle_id,
+                JobStatus::Failed {
+                    reason: format!("spawn {}: {e}", prog.display()),
+                },
+                None,
+            )
+            .await;
+            return;
+        }
+    };
+    let pid = child.id();
+    if let Some(pid) = pid {
+        let jobs = app.state::<JobState>();
+        let mut guard = jobs.0.lock().await;
+        if let Some(rec) = guard.get_mut(&handle_id) {
+            rec.local_pid = Some(pid);
+        }
+    }
+
+    let stdout_pipe = child.stdout.take();
+    let stderr_pipe = child.stderr.take();
+    let out_task = tokio::spawn(async move {
+        let mut so = Vec::new();
+        let mut se = Vec::new();
+        if let Some(mut p) = stdout_pipe {
+            let _ = p.read_to_end(&mut so).await;
+        }
+        if let Some(mut p) = stderr_pipe {
+            let _ = p.read_to_end(&mut se).await;
+        }
+        (so, se)
+    });
+
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(u64::from(max_minutes) * 60 + 60);
+    match timeout_at(deadline, child.wait()).await {
+        Ok(Ok(exit)) => {
+            let (so, se) = out_task.await.unwrap_or_default();
+            finish_output(
+                &app,
+                &handle_id,
+                CommandOutput {
+                    stdout: so,
+                    stderr: se,
+                    exit_code: exit.code(),
+                    error: None,
+                },
+                &secrets,
+            )
+            .await;
+        }
+        Ok(Err(e)) => {
+            finish_job(
+                &app,
+                &handle_id,
+                JobStatus::Failed {
+                    reason: format!("wait: {e}"),
+                },
+                None,
+            )
+            .await;
+        }
+        Err(_) => {
+            if let Some(pid) = pid {
+                kill_tree(pid).await;
+            }
+            let _ = child.wait().await;
+            let (so, se) = out_task.await.unwrap_or_default();
+            let mut output = CommandOutput {
+                stdout: so,
+                stderr: se,
+                exit_code: None,
+                error: Some("command timed out".to_string()),
+            };
+            let refs: Vec<&str> = secrets.iter().map(String::as_str).collect();
+            output.stdout = jobscript::redact(std::mem::take(&mut output.stdout), &refs);
+            output.stderr = jobscript::redact(std::mem::take(&mut output.stderr), &refs);
+            finish_job(&app, &handle_id, JobStatus::TimedOut, Some(output)).await;
         }
     }
 }
@@ -435,7 +722,7 @@ pub async fn job_cancel(
     jobs: State<'_, JobState>,
     handle_id: String,
 ) -> Result<(), String> {
-    let (cfg, sandbox_id) = {
+    let (cfg, sandbox_id, local_pid, is_local) = {
         let mut guard = jobs.0.lock().await;
         let rec = guard
             .get_mut(&handle_id)
@@ -443,10 +730,21 @@ pub async fn job_cancel(
         rec.status = JobStatus::Failed {
             reason: "cancelled".to_string(),
         };
-        (rec.cfg.clone(), rec.sandbox_id.clone())
+        (
+            rec.cfg.clone(),
+            rec.sandbox_id.clone(),
+            rec.local_pid,
+            rec.sandbox.is_none(),
+        )
     };
-    let runner = E2bRunner::new(cfg)?;
-    let _ = runner.kill_sandbox(&sandbox_id).await;
+    if is_local {
+        if let Some(pid) = local_pid {
+            kill_tree(pid).await;
+        }
+    } else {
+        let runner = E2bRunner::new(cfg)?;
+        let _ = runner.kill_sandbox(&sandbox_id).await;
+    }
     let _ = app;
     Ok(())
 }
@@ -593,6 +891,24 @@ mod tests {
         assert!(seen.contains("content-type: application/connect+json"), "wrong rpc encoding");
 
         server.abort();
+    }
+
+    #[test]
+    fn local_workdir_is_posix_shaped() {
+        let w = local_workdir_posix("12345");
+        assert!(!w.contains('\\'));
+        assert!(w.contains("don-a-token-job-12345"));
+        #[cfg(windows)]
+        {
+            assert!(w.starts_with('/'));
+            assert!(w.chars().nth(1).unwrap().is_ascii_alphabetic());
+        }
+    }
+
+    #[test]
+    fn resolve_sh_finds_a_shell() {
+        let sh = resolve_sh().unwrap();
+        assert!(sh.is_file());
     }
 
     /// Live smoke against a real backend (Embed or Cloud). Ignored by

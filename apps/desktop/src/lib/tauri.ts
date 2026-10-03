@@ -81,6 +81,7 @@ export async function githubDevicePoll(
 export const MANAGE_USAGE_URL = "https://chatgpt.com/settings/usage";
 
 export interface RunnerConfig {
+  backend: string;
   api_base: string;
   api_key: string | null;
   sandbox_base: string | null;

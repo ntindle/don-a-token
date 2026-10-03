@@ -27,7 +27,7 @@ website/               static site on Cloudflare Pages
    per-app in ChatGPT usage settings (linked from the app).
 3. **Projects** — curated registry entries with required providers,
    work categories and tiers; per-job caps.
-4. **Setup** — runner backend (Embed/Cloud) and contribution identity
+4. **Setup** — runner backend (local/Embed/Cloud) and contribution identity
    (GitHub username + token) for PR attribution.
 
 ### Donation loop

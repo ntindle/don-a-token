@@ -55,6 +55,7 @@ export function buildSchedulerConfig(settings: Settings): SchedulerConfig {
   switch (settings.runnerBackend) {
     case "embed-local":
       runner = {
+        backend: "embed-local",
         api_base: "http://127.0.0.1:3000",
         api_key: settings.e2bApiKey,
         sandbox_base: null,
@@ -62,6 +63,7 @@ export function buildSchedulerConfig(settings: Settings): SchedulerConfig {
       break;
     case "embed-remote":
       runner = {
+        backend: "embed-remote",
         api_base: settings.embedEndpoint,
         api_key: settings.e2bApiKey,
         sandbox_base: null,
@@ -69,8 +71,17 @@ export function buildSchedulerConfig(settings: Settings): SchedulerConfig {
       break;
     case "e2b-cloud":
       runner = {
+        backend: "e2b-cloud",
         api_base: "https://api.e2b.dev",
         api_key: settings.e2bApiKey,
+        sandbox_base: null,
+      };
+      break;
+    case "local":
+      runner = {
+        backend: "local",
+        api_base: "",
+        api_key: null,
         sandbox_base: null,
       };
       break;
@@ -81,6 +92,7 @@ export function buildSchedulerConfig(settings: Settings): SchedulerConfig {
         rules: settings.rules,
         projects: [],
         runner: {
+          backend: "docker-local",
           api_base: "http://127.0.0.1:3000",
           api_key: null,
           sandbox_base: null,

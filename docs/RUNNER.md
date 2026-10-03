@@ -27,6 +27,14 @@ platform matrix, not the API.
 Implemented as `Backend` in `crates/core/src/runner.rs`; the narrow
 `Runner` trait (`submit`/`status`/`cancel`) keeps backends swappable.
 
+## Local backend (testing only)
+
+`local` runs the job bootstrap directly on-host (Git Bash + host
+`codex`/`cargo`/`git`) with **no isolation**. It exists to prove the
+end-to-end loop (run → patch → PR) before trusting a sandbox with it.
+Never the default; the Setup UI labels it testing-only. Timeouts kill
+the whole process tree so no orphaned agent burns plan after the cap.
+
 ## Job lifecycle
 
 ```text
@@ -70,6 +78,8 @@ never expose long-lived donor credentials to the sandbox.
   `git push` / `gh pr create`, never argv, never the sandbox).
   Follow-up: short-lived, per-job contribution credentials scoped to
   the target repo.
+- PRs to repos the donor doesn't own go via their fork (created on
+  demand with `gh repo fork`); the PR head is `donor:branch`.
 - Every PR footer carries: donor identity, project job-spec version, and
   the SIWC `client_id` as harness provenance.
 - Projects verify PRs against the contributions tracker + registry history.
