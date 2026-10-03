@@ -24,6 +24,8 @@ function describeVerdict(v: string): string {
   switch (v) {
     case "unconfigured":
       return "Not configured yet — finish setup to start donating.";
+    case "waiting-for-sync":
+      return "Waiting for the app window to confirm settings…";
     case "restored":
     case "synced":
     case "submitted":

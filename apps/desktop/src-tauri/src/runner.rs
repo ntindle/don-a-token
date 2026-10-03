@@ -549,25 +549,58 @@ async fn preflight_local() -> Result<(), String> {
 }
 
 /// Kill a local job's whole process tree. Best effort; the caller
-/// ignores errors (the pid may already be gone).
+/// ignores errors (the pid may already be gone). Runs twice with a
+/// pause: tree enumeration can miss grandchildren born mid-kill, and a
+/// surviving agent keeps burning plan (plus holds the output pipes
+/// open, which would wedge job completion).
 async fn kill_tree(pid: u32) {
-    #[cfg(windows)]
-    {
-        let _ = tokio::process::Command::new("taskkill")
-            .args(["/F", "/T", "/PID", &pid.to_string()])
-            .output()
-            .await;
+    for _ in 0..2 {
+        #[cfg(windows)]
+        {
+            let _ = tokio::process::Command::new("taskkill")
+                .args(["/F", "/T", "/PID", &pid.to_string()])
+                .output()
+                .await;
+        }
+        #[cfg(not(windows))]
+        {
+            let _ = tokio::process::Command::new("pkill")
+                .args(["-9", "-P", &pid.to_string()])
+                .output()
+                .await;
+            let _ = tokio::process::Command::new("kill")
+                .args(["-9", &pid.to_string()])
+                .output()
+                .await;
+        }
+        tokio::time::sleep(Duration::from_secs(2)).await;
     }
-    #[cfg(not(windows))]
-    {
-        let _ = tokio::process::Command::new("pkill")
-            .args(["-9", "-P", &pid.to_string()])
-            .output()
-            .await;
-        let _ = tokio::process::Command::new("kill")
-            .args(["-9", &pid.to_string()])
-            .output()
-            .await;
+}
+
+/// Seconds to wait for captured output after the child is gone before
+/// recording the outcome anyway. Orphaned grandchildren can hold the
+/// pipes open indefinitely; the job must not wedge behind them.
+const OUTPUT_DRAIN_SECS: u64 = 15;
+
+/// Join the output-drain task, giving up after `OUTPUT_DRAIN_SECS`
+/// (the task is dropped; orphans keep whatever they hold).
+async fn drain_output(
+    out_task: tokio::task::JoinHandle<(Vec<u8>, Vec<u8>)>,
+    handle_id: &str,
+) -> (Vec<u8>, Vec<u8>) {
+    match timeout(Duration::from_secs(OUTPUT_DRAIN_SECS), out_task).await {
+        Ok(Ok(out)) => out,
+        Ok(Err(e)) => {
+            eprintln!("[runner] {handle_id}: output drain failed: {e}");
+            (Vec::new(), Vec::new())
+        }
+        Err(_) => {
+            eprintln!(
+                "[runner] {handle_id}: output pipes still open after\
+                 {OUTPUT_DRAIN_SECS}s; an orphaned grandchild survived the kill"
+            );
+            (Vec::new(), Vec::new())
+        }
     }
 }
 
@@ -720,7 +753,7 @@ async fn drive_local(app: AppHandle, handle_id: String, command: Vec<String>) {
     let deadline = tokio::time::Instant::now() + Duration::from_secs(u64::from(max_minutes) * 60 + 60);
     match timeout_at(deadline, child.wait()).await {
         Ok(Ok(exit)) => {
-            let (so, se) = out_task.await.unwrap_or_default();
+            let (so, se) = drain_output(out_task, &handle_id).await;
             finish_output(
                 &app,
                 &handle_id,
@@ -749,8 +782,12 @@ async fn drive_local(app: AppHandle, handle_id: String, command: Vec<String>) {
             if let Some(pid) = pid {
                 kill_tree(pid).await;
             }
-            let _ = child.wait().await;
-            let (so, se) = out_task.await.unwrap_or_default();
+            if timeout(Duration::from_secs(15), child.wait()).await.is_err() {
+                eprintln!(
+                    "[runner] {handle_id}: child {pid:?} survived the timeout kill and keeps running (plan may keep burning)"
+                );
+            }
+            let (so, se) = drain_output(out_task, &handle_id).await;
             let mut output = CommandOutput {
                 stdout: so,
                 stderr: se,

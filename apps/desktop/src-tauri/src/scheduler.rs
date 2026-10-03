@@ -81,6 +81,10 @@ struct SchedulerData {
     consecutive_failures: u32,
     last_verdict: String,
     halted_emitted: bool,
+    /// True once the live frontend has synced this boot. A restored
+    /// config alone never submits: it can predate the donor's current
+    /// settings (a stale 40-min cap once killed a job 30s from success).
+    synced_this_boot: bool,
 }
 
 impl Default for SchedulerData {
@@ -94,6 +98,7 @@ impl Default for SchedulerData {
             consecutive_failures: 0,
             last_verdict: "unconfigured".to_string(),
             halted_emitted: false,
+            synced_this_boot: false,
         }
     }
 }
@@ -173,7 +178,9 @@ fn app_dir(app: &AppHandle) -> Result<std::path::PathBuf, String> {
     Ok(dir)
 }
 
-/// Restore the last synced config so the loop works after restart.
+/// Restore the last synced config so the loop has something to show
+/// after restart. Restored config alone never submits (see
+/// `synced_this_boot`); the live frontend confirms it within seconds.
 pub fn restore(app: &AppHandle) {
     let path = match app_dir(app) {
         Ok(d) => d.join("scheduler.json"),
@@ -213,6 +220,7 @@ pub async fn scheduler_sync(
     std::fs::write(dir.join("scheduler.json"), bytes).map_err(|e| format!("save config: {e}"))?;
     let mut data = state.0.lock().await;
     data.config = Some(config);
+    data.synced_this_boot = true;
     // A settings change is an explicit retry: clear any backoff.
     data.consecutive_failures = 0;
     data.halted_emitted = false;
@@ -299,7 +307,7 @@ async fn tick(app: &AppHandle) {
     }
 
     // Nothing running: decide whether to submit.
-    let (config, last_finished, failures) = {
+    let (config, last_finished, failures, synced) = {
         let data = sched.0.lock().await;
         match &data.config {
             None => {
@@ -307,9 +315,18 @@ async fn tick(app: &AppHandle) {
                 sched.0.lock().await.last_verdict = "unconfigured".to_string();
                 return;
             }
-            Some(cfg) => (cfg.clone(), data.last_finished, data.consecutive_failures),
+            Some(cfg) => (
+                cfg.clone(),
+                data.last_finished,
+                data.consecutive_failures,
+                data.synced_this_boot,
+            ),
         }
     };
+    if !synced {
+        sched.0.lock().await.last_verdict = "waiting-for-sync".to_string();
+        return;
+    }
     if config.projects.is_empty() {
         sched.0.lock().await.last_verdict = "no-projects".to_string();
         return;
@@ -637,8 +654,8 @@ async fn submit_next(app: &AppHandle, config: &SchedulerConfig) {
             data.last_project_id = Some(spec.id.clone());
             data.last_verdict = "submitted".to_string();
             eprintln!(
-                "[sched] submitted {} job {} via {}",
-                spec.id, job_id, config.runner.backend
+                "[sched] submitted {} job {} via {} (max_minutes={})",
+                spec.id, job_id, config.runner.backend, max_minutes
             );
         }
         Err(e) => {
