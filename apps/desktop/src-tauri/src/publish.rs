@@ -44,6 +44,10 @@ fn section(text: &str, begin: &str, end: &str) -> Option<String> {
 pub fn extract_patch(stdout: &[u8]) -> PatchOutcome {
     let text = String::from_utf8_lossy(stdout);
     if let Some(patch) = section(&text, jobscript::MARK_PATCH_BEGIN, jobscript::MARK_PATCH_END) {
+        // git apply rejects a patch whose last line lacks its newline
+        // ("corrupt patch"); section() trims framing newlines, so
+        // restore exactly one.
+        let patch = format!("{}\n", patch.trim_end_matches('\n'));
         let result_md = section(&text, jobscript::MARK_RESULT_BEGIN, jobscript::MARK_RESULT_END);
         return PatchOutcome::Patch { patch, result_md };
     }
@@ -310,6 +314,70 @@ mod tests {
         assert_eq!(extract_patch(b"ok\nNO_CHANGES=1\n"), PatchOutcome::NoChanges);
         assert_eq!(extract_patch(b"ok\nPATCH_TOO_LARGE=1\n"), PatchOutcome::TooLarge);
         assert_eq!(extract_patch(b"codex failed early"), PatchOutcome::Missing);
+    }
+
+    fn have_git() -> bool {
+        std::process::Command::new("git")
+            .arg("--version")
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false)
+    }
+
+    fn git(dir: &std::path::Path, args: &[&str]) -> Vec<u8> {
+        let out = std::process::Command::new("git")
+            .args(args)
+            .current_dir(dir)
+            .output()
+            .expect("spawn git");
+        assert!(
+            out.status.success(),
+            "git {args:?}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        out.stdout
+    }
+
+    /// A real diff through the real framing must survive extraction as
+    /// a patch `git apply` accepts (a trimmed trailing newline once
+    /// produced "corrupt patch" at publish time). Skips when git is
+    /// unavailable.
+    #[test]
+    fn extracted_patch_applies_cleanly() {
+        if !have_git() {
+            return;
+        }
+        let base = std::env::temp_dir().join(format!("dat-apply-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let a = base.join("a");
+        let b = base.join("b");
+        std::fs::create_dir_all(&a).unwrap();
+        std::fs::create_dir_all(&b).unwrap();
+        let v1 = "one\ntwo\nthree\nfour\nfive\n";
+        for d in [&a, &b] {
+            git(d, &["-c", "init.defaultBranch=main", "init"]);
+            git(d, &["config", "user.email", "t@t"]);
+            git(d, &["config", "user.name", "t"]);
+            git(d, &["config", "commit.gpgsign", "false"]);
+            std::fs::write(d.join("file.txt"), v1).unwrap();
+            git(d, &["add", "-A"]);
+            git(d, &["commit", "-m", "v1"]);
+        }
+        std::fs::write(a.join("file.txt"), "one\nTWO\nthree\nfour\nfive\n").unwrap();
+        let diff = git(&a, &["diff"]);
+        // Mimic the bootstrap framing: echo MARK_BEGIN; cat patch; echo MARK_END.
+        let mut framed =
+            format!("agent chatter\n{}\n", jobscript::MARK_PATCH_BEGIN).into_bytes();
+        framed.extend_from_slice(&diff);
+        framed.extend_from_slice(format!("{}\n", jobscript::MARK_PATCH_END).as_bytes());
+        let PatchOutcome::Patch { patch, .. } = extract_patch(&framed) else {
+            panic!("expected a patch");
+        };
+        assert!(patch.ends_with('\n'), "patch must end with newline");
+        let patch_file = base.join("out.patch");
+        std::fs::write(&patch_file, &patch).unwrap();
+        git(&b, &["apply", "--check", patch_file.to_str().unwrap()]);
+        let _ = std::fs::remove_dir_all(&base);
     }
 
     #[test]

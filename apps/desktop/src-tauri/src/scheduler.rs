@@ -482,11 +482,11 @@ async fn publish_succeeded(
         publish::PatchOutcome::Missing => ("no-patch".to_string(), None, true),
         publish::PatchOutcome::Patch { patch, result_md } => {
             let Some(token) = meta.github_token.clone() else {
-                let path = save_pending_patch(app, handle_id, meta, &patch);
+                let path = save_pending_patch(app, handle_id, meta, &patch, None);
                 return ("needs-publish".to_string(), path, false);
             };
             if !publish::tools_available() {
-                let path = save_pending_patch(app, handle_id, meta, &patch);
+                let path = save_pending_patch(app, handle_id, meta, &patch, None);
                 return ("needs-publish".to_string(), path.or(Some("git/gh not on PATH".to_string())), false);
             }
             let owned = (
@@ -518,7 +518,8 @@ async fn publish_succeeded(
             match res {
                 Ok(Ok(url)) => ("published".to_string(), Some(url), false),
                 Ok(Err(e)) => {
-                    let path = save_pending_patch(app, handle_id, meta, &patch);
+                    eprintln!("[sched] publish {handle_id} failed: {e}");
+                    let path = save_pending_patch(app, handle_id, meta, &patch, Some(&e));
                     let detail = path.unwrap_or_else(|| truncate(&e, 200));
                     ("publish-failed".to_string(), Some(detail), true)
                 }
@@ -529,12 +530,15 @@ async fn publish_succeeded(
 }
 
 /// Stash an unpublished patch + its publish context under the app dir
-/// for later manual publishing. Returns the patch path when written.
+/// for later manual publishing (plus the failure reason when this is a
+/// failure stash, so the error survives even though the log detail
+/// carries the path). Returns the patch path when written.
 fn save_pending_patch(
     app: &AppHandle,
     handle_id: &str,
     meta: &ActiveJobMeta,
     patch: &str,
+    err: Option<&str>,
 ) -> Option<String> {
     let dir = app_dir(app).ok()?.join("pending-patches");
     std::fs::create_dir_all(&dir).ok()?;
@@ -551,6 +555,9 @@ fn save_pending_patch(
         "pr_body": meta.pr_body,
     });
     let _ = std::fs::write(dir.join(format!("{safe}.json")), ctx.to_string());
+    if let Some(e) = err {
+        let _ = std::fs::write(dir.join(format!("{safe}.err")), e);
+    }
     Some(patch_path.to_string_lossy().to_string())
 }
 
